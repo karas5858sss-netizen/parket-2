@@ -37,7 +37,7 @@ html, body {
 }
 body {
   min-height: 100vh;
-  padding: calc(env(safe-area-inset-top) + 10px) 14px calc(env(safe-area-inset-bottom) + 84px);
+  padding: calc(var(--tg-safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--tg-content-safe-area-inset-top, 0px) + 10px) 14px calc(env(safe-area-inset-bottom) + 84px);
 }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -93,8 +93,8 @@ summary { cursor: pointer; }
 .status { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; color: var(--hint); font-size: 13px; }
 .status button { padding: 6px 10px; border-radius: 8px; background: var(--surface); color: var(--text); }
 
-.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; padding-bottom: env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
-.tabs button { padding: 14px 0; color: var(--hint); }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
+.tabs button { padding: 14px 0; color: var(--hint); font-size: 15px; }
 .tabs button[aria-pressed="true"] { color: var(--accent-text); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
 
 
@@ -126,6 +126,22 @@ summary { cursor: pointer; }
 
 .toast { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 64px); z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 14px; background: #23272e; color: #fff; font-size: 14px; }
 .toast button { padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, .16); font-weight: 600; white-space: nowrap; }
+
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
+.cal .wd { padding: 4px 0; text-align: center; color: var(--hint); font-size: 12px; }
+.cell { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 1 / 1; border-radius: 12px; font-size: 15px; font-variant-numeric: tabular-nums; }
+.cell.out { visibility: hidden; }
+.cell.has { background: var(--accent-soft); font-weight: 600; }
+.cell.today { box-shadow: inset 0 0 0 2px var(--accent); }
+.cell[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.cell .rd { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #e5484d; }
+.q { display: block; width: 100%; margin-top: 14px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; }
+.q:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { padding: 6px 12px; border-radius: 999px; background: var(--surface); font-size: 14px; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.count { margin: 14px 2px 0; color: var(--hint); font-size: 13px; }
+.more { display: block; margin: 12px auto 0; padding: 8px 16px; border-radius: 10px; background: var(--surface); font-weight: 600; }
 
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
@@ -162,13 +178,16 @@ summary { cursor: pointer; }
     docs: cachedState && cachedState.docs ? { me: normDoc(cachedState.docs.me), her: normDoc(cachedState.docs.her) } : { me: emptyDoc(), her: emptyDoc() },
     profile: (cachedState && cachedState.who) || (store.get('parket.profile') === 'her' ? 'her' : 'me'),
     userPicked: false,
-    tab: store.get('parket.tab') === 'week' ? 'week' : 'today',
+    tab: ['week', 'month', 'search'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
     data: {},        // profile -> { lessons, group, fetchedAt, errors }
     err: null,
     loading: false,
     sync: { code: 'idle' },
     weekOf: null,    // понедельник показанной недели
     selDate: null,   // выбранный день в «Неделе»
+    month: null,     // показанный месяц 'YYYY-MM'
+    calSel: null,    // выбранный день в «Месяце»
+    q: '', kind: 'all', onlyHw: false, past: false, limit: 50, // поиск
   };
   const LABEL = { me: 'Кирилл', her: 'Маша' };
   const readCache = (p) => { try { return JSON.parse(store.get('parket.cache.' + p)); } catch (e) { return null; } };
@@ -186,6 +205,7 @@ summary { cursor: pointer; }
   const ms = (s) => Date.parse(s + 'Z');
   const WD = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
   const MON = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const MON_N = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
   const MON_S = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const dOf = (s) => new Date(s + 'T00:00:00Z');
   const dow = (s) => dOf(s).getUTCDay();
@@ -292,6 +312,94 @@ summary { cursor: pointer; }
     return html;
   }
 
+
+  // ---------- экран «Месяц» ----------
+  // Красная точка ставится на день, к которому нужно ДЗ: ближайшая будущая пара предмета с активным ДЗ.
+  function hwDueDays(all) {
+    const now = nowStr();
+    const due = new Set();
+    for (const [sk, v] of Object.entries(curDoc().hw)) {
+      if (v.done) continue;
+      const nx = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
+      if (nx) due.add(nx.date);
+    }
+    return due;
+  }
+
+  function viewMonth(all) {
+    const today = nowStr().slice(0, 10);
+    if (!state.month) state.month = today.slice(0, 7);
+    const [y, m] = state.month.split('-').map(Number);
+    const lead = (dow(state.month + '-01') + 6) % 7;
+    const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const count = new Map();
+    for (const l of all) if (l.date.slice(0, 7) === state.month) count.set(l.date, (count.get(l.date) || 0) + 1);
+    const due = hwDueDays(all);
+    if (state.calSel && state.calSel.slice(0, 7) !== state.month) state.calSel = null;
+    if (!state.calSel && today.slice(0, 7) === state.month) state.calSel = today;
+    let html = `<div class="wk"><button data-act="mprev" aria-label="Предыдущий месяц">‹</button><span class="rng">${MON_N[m - 1]} ${y}</span>` +
+      '<button data-act="mnext" aria-label="Следующий месяц">›</button></div><div class="cal">';
+    ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].forEach((w) => { html += `<div class="wd">${w}</div>`; });
+    for (let i = 0; i < lead; i++) html += '<span class="cell out"></span>';
+    for (let d = 1; d <= dim; d++) {
+      const ds = `${state.month}-${pad(d)}`;
+      const n = count.get(ds) || 0;
+      const dueHere = due.has(ds);
+      const label = `${d} ${MON[m - 1]}, ${n ? 'пар: ' + n : 'пар нет'}${dueHere ? ', нужно ДЗ' : ''}`;
+      html += `<button class="cell${n ? ' has' : ''}${ds === today ? ' today' : ''}" data-act="cell" data-date="${ds}" aria-pressed="${ds === state.calSel}" aria-label="${label}">` +
+        `${d}${dueHere ? '<i class="rd"></i>' : ''}</button>`;
+    }
+    html += '</div>';
+    if (state.month !== today.slice(0, 7)) html += '<button class="tolink" data-act="mtoday">К текущему месяцу</button>';
+    html += '<div class="ro">Красная точка: к этому дню нужно ДЗ</div>';
+    if (state.calSel) {
+      const list = all.filter((l) => l.date === state.calSel);
+      html += `<h2>${WD[dow(state.calSel)]}, ${human(state.calSel)}</h2>`;
+      html += list.length ? list.map(lessonHTML).join('') : '<div class="empty"><div class="ttl">В этот день пар нет</div></div>';
+    } else {
+      html += '<h2>Выбери день</h2>';
+    }
+    return html;
+  }
+
+  // ---------- экран «Поиск» ----------
+  const norm = (s) => String(s || '').toLowerCase().replace(/ё/g, 'е');
+  const haystack = (l) => norm([l.subject, l.teacher, l.room, l.kind]
+    .concat((l.variants || []).reduce((a, v) => a.concat([v.teacher, v.room]), [])).join(' '));
+
+  function resultsHTML(all) {
+    const today = nowStr().slice(0, 10);
+    const doc = curDoc();
+    const toks = norm(state.q).split(/\s+/).filter(Boolean);
+    const list = all.filter((l) => {
+      if (!state.past && l.date < today) return false;
+      if (state.kind !== 'all' && l.kind !== state.kind) return false;
+      if (state.onlyHw) { const h = doc.hw[skey(l)]; if (!h || h.done) return false; }
+      const hay = haystack(l);
+      return toks.every((t) => hay.includes(t));
+    });
+    if (!list.length) return '<div class="empty"><div class="ttl">Ничего не найдено</div><div class="meta">Попробуй другое слово или сними фильтры.</div></div>';
+    const shown = list.slice(0, state.limit);
+    let html = `<div class="count">Найдено пар: ${list.length}</div>`;
+    let lastDate = '';
+    for (const l of shown) {
+      if (l.date !== lastDate) { html += `<h2>${WD[dow(l.date)]}, ${human(l.date)}</h2>`; lastDate = l.date; }
+      html += lessonHTML(l);
+    }
+    if (list.length > shown.length) html += `<button class="more" data-act="more">Показать ещё</button>`;
+    return html;
+  }
+
+  function viewSearch(all) {
+    const kinds = [['all', 'Все'], ['лек', 'Лекции'], ['пр', 'Практики'], ['лаб', 'Лабы']];
+    return `<input id="q" class="q" type="search" placeholder="Предмет, преподаватель, аудитория" autocomplete="off" enterkeyhint="search" value="${esc(state.q)}">` +
+      '<div class="chips">' +
+      kinds.map(([v, t]) => `<button class="chip" data-act="kind" data-v="${v}" aria-pressed="${state.kind === v}">${t}</button>`).join('') +
+      `<button class="chip" data-act="tgl" data-v="onlyHw" aria-pressed="${state.onlyHw}">С ДЗ</button>` +
+      `<button class="chip" data-act="tgl" data-v="past" aria-pressed="${state.past}">И прошедшие</button></div>` +
+      `<div id="results">${resultsHTML(all)}</div>`;
+  }
+
   // ---------- сообщения о состоянии общего хранилища ----------
   function syncNote() {
     const s = state.sync;
@@ -306,6 +414,8 @@ summary { cursor: pointer; }
   function render() {
     const app = document.getElementById('app');
     const openStates = [...app.querySelectorAll('details')].map((d) => d.open);
+    const ae = document.activeElement;
+    const keepQ = ae && ae.id === 'q' ? { s: ae.selectionStart, e: ae.selectionEnd } : null;
     document.documentElement.dataset.profile = state.profile;
     const d = state.data[state.profile];
     const sw = ['me', 'her'].map((p) => {
@@ -319,7 +429,7 @@ summary { cursor: pointer; }
         '<br><button data-act="refresh">Повторить</button></div>';
     }
     if (d) {
-      body += state.tab === 'today' ? viewToday(d.lessons) : viewWeek(d.lessons);
+      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch }[state.tab](d.lessons);
       const t = d.fetchedAt
         ? new Date(d.fetchedAt).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })
         : '';
@@ -330,10 +440,11 @@ summary { cursor: pointer; }
     } else if (state.loading) {
       body += '<div class="empty"><div class="ttl">Загружаю расписание…</div></div>';
     }
-    const tabs = ['today', 'week'].map((k) =>
-      `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${k === 'today' ? 'Сегодня' : 'Неделя'}</button>`).join('');
+    const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск']].map(([k, t]) =>
+      `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${t}</button>`).join('');
     app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
+    if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
   }
 
   // ---------- расписание ----------
@@ -539,11 +650,32 @@ summary { cursor: pointer; }
       state.selDate = b.dataset.date; render();
     } else if (act === 'today') {
       state.weekOf = null; state.selDate = null; render();
+    } else if (act === 'mprev' || act === 'mnext') {
+      const [yy, mm] = state.month.split('-').map(Number);
+      const nd = new Date(Date.UTC(yy, mm - 1 + (act === 'mnext' ? 1 : -1), 1));
+      state.month = nd.getUTCFullYear() + '-' + pad(nd.getUTCMonth() + 1); state.calSel = null; render();
+    } else if (act === 'mtoday') {
+      state.month = null; state.calSel = null; render();
+    } else if (act === 'cell') {
+      state.calSel = b.dataset.date; render();
+    } else if (act === 'kind') {
+      state.kind = b.dataset.v; state.limit = 50; render();
+    } else if (act === 'tgl') {
+      state[b.dataset.v] = !state[b.dataset.v]; state.limit = 50; render();
+    } else if (act === 'more') {
+      state.limit += 50; render();
     } else if (act === 'refresh') {
       load(state.profile);
       loadState().then(() => { render(); flush(); });
     }
     if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
+  });
+
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'q') return;
+    state.q = e.target.value; state.limit = 50;
+    const r = document.getElementById('results');
+    if (r) r.innerHTML = resultsHTML((state.data[state.profile] || {}).lessons || []);
   });
 
   document.addEventListener('keydown', (e) => {
