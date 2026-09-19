@@ -153,6 +153,14 @@ summary { cursor: pointer; }
 .sw.none::before { content: "×"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .sw.none[aria-pressed="true"]::after { content: ""; }
 
+.sheet textarea { font-size: 16px; font-weight: 400; }
+.in { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); font-family: inherit; font-size: 16px; font-weight: 400; }
+.in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sheet .err { margin-top: 12px; }
+.badge.k-own { background: transparent; color: var(--hint); box-shadow: inset 0 0 0 1px var(--line); }
+.fab { position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 72px); z-index: 10; width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 28px; line-height: 1; box-shadow: 0 4px 14px rgba(0, 0, 0, .28); }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
@@ -175,14 +183,15 @@ summary { cursor: pointer; }
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
   const readJSON = (k, d) => { try { const v = JSON.parse(store.get(k)); return v == null ? d : v; } catch (e) { return d; } };
-  const emptyDoc = () => ({ hw: {}, done: {}, colors: {} });
-  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {} });
+  const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {} });
+  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {}, custom: (d && d.custom) || {} });
 
   const cachedState = readJSON('parket.state', null);
   const pending = readJSON('parket.pending', {});
   pending.hw = pending.hw || {};
   pending.done = pending.done || {};
   pending.colors = pending.colors || {};
+  pending.custom = pending.custom || {};
 
   const state = {
     who: cachedState && cachedState.who ? cachedState.who : null, // чей это телефон: 'me' | 'her'
@@ -242,6 +251,29 @@ summary { cursor: pointer; }
   const canEdit = () => !!state.who && state.who === state.profile;
   const isDone = (l) => !!curDoc().done[lkey(l)];
 
+
+  // ---------- свои пары: превращаем записи в обычные карточки ----------
+  function expandCustom(id, c) {
+    const skip = new Set(c.skip || []);
+    const dates = [];
+    if (c.until) { for (let d = c.date, n = 0; d <= c.until && n <= 60; d = addDays(d, 7), n++) dates.push(d); } else dates.push(c.date);
+    return dates.filter((d) => !skip.has(d)).map((d) => ({
+      id: 'c:' + id + ':' + d, cid: id, custom: true, date: d, start: c.start, end: c.end,
+      startAt: d + 'T' + c.start + ':00', endAt: d + 'T' + c.end + ':00', num: 0,
+      kind: c.kind || null, subject: c.title, title: c.title, teacher: c.teacher || '', room: c.room || '',
+      color: null, subgroup: 0, weekType: 0, replaced: false,
+    }));
+  }
+  function allLessons(profile) {
+    const p = profile || state.profile;
+    const base = (state.data[p] || {}).lessons || [];
+    const doc = state.docs[p];
+    const extra = [];
+    if (doc && doc.custom) for (const [id, c] of Object.entries(doc.custom)) extra.push(...expandCustom(id, c));
+    if (!extra.length) return base;
+    return base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  }
+
   // ---------- карточка пары ----------
   function lessonHTML(l) {
     const kind = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[l.kind] || 'other';
@@ -265,7 +297,7 @@ summary { cursor: pointer; }
     const col = colorOf(skey(l));
     return `<article class="lesson${done ? ' isdone' : ''}${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
       `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
-      `<div><div class="ttl">${badge}${esc(l.subject)}</div>${meta}</div></article>`;
+      `<div><div class="ttl">${badge}${l.custom ? '<span class="badge k-own">своя</span>' : ''}${esc(l.subject)}</div>${meta}</div></article>`;
   }
 
   function hwListHTML() {
@@ -450,7 +482,7 @@ summary { cursor: pointer; }
         '<br><button data-act="refresh">Повторить</button></div>';
     }
     if (d) {
-      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch }[state.tab](d.lessons);
+      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch }[state.tab](allLessons());
       const t = d.fetchedAt
         ? new Date(d.fetchedAt).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })
         : '';
@@ -463,7 +495,7 @@ summary { cursor: pointer; }
     }
     const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск']].map(([k, t]) =>
       `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${t}</button>`).join('');
-    app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>`;
+    app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
     if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
   }
@@ -488,7 +520,7 @@ summary { cursor: pointer; }
   }
 
   // ---------- общее хранилище: ДЗ и отметки ----------
-  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length > 0;
+  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length + Object.keys(pending.custom).length > 0;
   const persistState = () => store.set('parket.state', JSON.stringify({ who: state.who, docs: state.docs }));
   const persistPending = () => store.set('parket.pending', JSON.stringify(pending));
   let lastStateAt = 0;
@@ -501,6 +533,10 @@ summary { cursor: pointer; }
     }
     for (const [k, v] of Object.entries(patch.done || {})) {
       if (v) doc.done[k] = now; else delete doc.done[k];
+    }
+    if (!doc.custom) doc.custom = {};
+    for (const [k, v] of Object.entries(patch.custom || {})) {
+      if (v) doc.custom[k] = Object.assign({}, v, { t: now }); else delete doc.custom[k];
     }
     if (!doc.colors) doc.colors = {};
     for (const [k, v] of Object.entries(patch.colors || {})) {
@@ -543,6 +579,7 @@ summary { cursor: pointer; }
       for (const k of Object.keys(sent.hw)) if (JSON.stringify(pending.hw[k]) === JSON.stringify(sent.hw[k])) delete pending.hw[k];
       for (const k of Object.keys(sent.done)) if (pending.done[k] === sent.done[k]) delete pending.done[k];
       for (const k of Object.keys(sent.colors || {})) if (pending.colors[k] === sent.colors[k]) delete pending.colors[k];
+      for (const k of Object.keys(sent.custom || {})) if (JSON.stringify(pending.custom[k]) === JSON.stringify(sent.custom[k])) delete pending.custom[k];
       persistPending();
     } catch (e) { /* останется в очереди, отправим при следующем случае */ }
     finally { flushing = false; render(); }
@@ -554,6 +591,7 @@ summary { cursor: pointer; }
     Object.assign(pending.hw, patch.hw || {});
     Object.assign(pending.done, patch.done || {});
     Object.assign(pending.colors, patch.colors || {});
+    Object.assign(pending.custom, patch.custom || {});
     persistState(); persistPending();
     render();
     flush();
@@ -562,8 +600,10 @@ summary { cursor: pointer; }
 
   // ---------- нижний лист с ДЗ ----------
   let sheetCtx = null;
+  let formCtx = null;
   function closeSheet() {
     sheetCtx = null;
+    formCtx = null;
     document.getElementById('sheet').innerHTML = '';
     document.body.style.overflow = '';
   }
@@ -573,8 +613,15 @@ summary { cursor: pointer; }
     const edit = canEdit();
     const l = o.lesson;
     sheetCtx = o;
+    const cc = l && l.custom ? doc.custom[l.cid] : null;
+    const own = cc ? `<div class="meta">Своя пара${cc.until ? ', каждую неделю до ' + human(cc.until) : ''}</div>` : '';
+    const custBtns = cc && edit
+      ? '<button class="btn" data-act="c-edit">Изменить пару</button>' +
+        (cc.until ? '<button class="btn" data-act="c-skip">Пропустить только эту дату</button>' : '') +
+        `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : 'Удалить пару'}</button>`
+      : '';
     const head = l
-      ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}</div>`
+      ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}</div>${own}`
       : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
     let body;
     if (edit) {
@@ -589,7 +636,7 @@ summary { cursor: pointer; }
         (hw ? `<button class="btn" data-act="hw-toggle">${hw.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
               '<button class="btn danger" data-act="hw-del">Удалить ДЗ</button>' : '') +
         (l ? `<button class="btn" data-act="lesson-done">${doc.done[lkey(l)] ? 'Снять отметку «пройдена»' : 'Отметить пару пройденной'}</button>` : '') +
-        '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
+        custBtns + '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
     } else {
       body = '<label>ДЗ по предмету</label><div class="view">' +
         (hw && hw.text ? esc(hw.text) + (hw.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
@@ -600,6 +647,67 @@ summary { cursor: pointer; }
     document.body.style.overflow = 'hidden';
     const ta = document.getElementById('hwtext');
     if (ta) ta.addEventListener('input', () => { document.getElementById('cnt').textContent = ta.value.length; });
+  }
+
+
+  // ---------- форма «Своя пара» ----------
+  function defaultDate() {
+    if (state.tab === 'week' && state.selDate) return state.selDate;
+    if (state.tab === 'month' && state.calSel) return state.calSel;
+    return nowStr().slice(0, 10);
+  }
+  const newId = () => (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).slice(0, 40);
+
+  function openForm(id, c) {
+    closeSheet();
+    formCtx = { id: id || newId(), kind: c ? c.kind || '' : '', weekly: !!(c && c.until), skip: c && c.skip ? c.skip : [] };
+    const v = c || { title: '', date: defaultDate(), start: '', end: '', room: '', teacher: '', until: '' };
+    const chips = (act, opts, cur) => opts.map(([val, t]) =>
+      `<button class="chip" type="button" data-act="${act}" data-v="${val}" aria-pressed="${cur === val}">${t}</button>`).join('');
+    document.getElementById('sheet').innerHTML =
+      '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
+      `<div class="ttl">${c ? 'Изменить пару' : 'Своя пара'}</div>` +
+      `<label>Название<input id="f-title" class="in" maxlength="80" autocomplete="off" value="${esc(v.title)}"></label>` +
+      `<label>Тип</label><div class="chips" id="f-kinds">${chips('f-kind', [['', 'Без типа'], ['лек', 'лек'], ['пр', 'пр'], ['лаб', 'лаб']], formCtx.kind)}</div>` +
+      `<label>Дата<input id="f-date" class="in" type="date" value="${esc(v.date)}"></label>` +
+      `<div class="row2"><label>Начало<input id="f-start" class="in" type="time" value="${esc(v.start)}"></label>` +
+      `<label>Конец<input id="f-end" class="in" type="time" value="${esc(v.end)}"></label></div>` +
+      `<label>Аудитория<input id="f-room" class="in" maxlength="40" autocomplete="off" value="${esc(v.room)}"></label>` +
+      `<label>Преподаватель<input id="f-teacher" class="in" maxlength="60" autocomplete="off" value="${esc(v.teacher)}"></label>` +
+      `<label>Повтор</label><div class="chips" id="f-repeats">${chips('f-repeat', [['0', 'Не повторять'], ['1', 'Каждую неделю']], formCtx.weekly ? '1' : '0')}</div>` +
+      `<label id="f-until-wrap"${formCtx.weekly ? '' : ' hidden'}>Повторять до<input id="f-until" class="in" type="date" value="${esc(v.until || '')}"></label>` +
+      '<div class="err" id="f-err" hidden></div>' +
+      '<div class="btns"><button class="btn primary" data-act="f-save">Сохранить</button><button class="btn" data-act="sheet-close">Отмена</button></div></div>';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function saveForm() {
+    const val = (id) => document.getElementById(id).value.trim();
+    const title = val('f-title'), date = val('f-date'), start = val('f-start'), end = val('f-end');
+    const until = formCtx.weekly ? val('f-until') : '';
+    let err = '';
+    if (!title) err = 'Введи название пары.';
+    else if (!date) err = 'Выбери дату.';
+    else if (!start || !end) err = 'Укажи время начала и конца.';
+    else if (end <= start) err = 'Конец должен быть позже начала.';
+    else if (formCtx.weekly) {
+      if (!until) err = 'Выбери, до какой даты повторять.';
+      else if (until < date) err = 'Дата «повторять до» раньше даты пары.';
+      else if ((Date.parse(until) - Date.parse(date)) / 864e5 > 400) err = 'Повтор не может быть дольше 400 дней (около 57 недель).';
+    }
+    if (err) {
+      const box = document.getElementById('f-err');
+      box.textContent = err; box.hidden = false;
+      return;
+    }
+    const entry = { title, kind: formCtx.kind, date, start, end, room: val('f-room'), teacher: val('f-teacher') };
+    if (until) {
+      entry.until = until;
+      const skip = formCtx.skip.filter((d) => d >= date && d <= until && ((Date.parse(d) - Date.parse(date)) / 864e5) % 7 === 0);
+      if (skip.length) entry.skip = skip;
+    }
+    save({ custom: { [formCtx.id]: entry } });
+    closeSheet();
   }
 
   function confirmTG(msg, ok) {
@@ -635,7 +743,7 @@ summary { cursor: pointer; }
     const act = b.dataset.act;
     if (act === 'open') {
       if (e.target.closest('details')) return;
-      const all = (state.data[state.profile] || {}).lessons || [];
+      const all = allLessons();
       const l = all.find((x) => lkey(x) === b.dataset.k);
       if (l) openSheet({ sk: skey(l), name: l.subject, lesson: l });
       return;
@@ -645,6 +753,49 @@ summary { cursor: pointer; }
       openSheet({ sk: b.dataset.sk, name: h ? h.name : '', lesson: null });
       return;
     }
+    if (act === 'add') { if (canEdit()) openForm(null, null); return; }
+    if (act === 'c-edit' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
+      const id = sheetCtx.lesson.cid;
+      openForm(id, curDoc().custom[id]);
+      return;
+    }
+    if (act === 'c-skip' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
+      const l = sheetCtx.lesson;
+      const old = curDoc().custom[l.cid];
+      if (old) {
+        const skip = Array.from(new Set((old.skip || []).concat(l.date)));
+        save({ custom: { [l.cid]: Object.assign({}, old, { skip }) } });
+        closeSheet();
+        toast('Дата пропущена', () => save({ custom: { [l.cid]: old } }));
+      }
+      return;
+    }
+    if (act === 'c-del' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
+      const l = sheetCtx.lesson;
+      const old = curDoc().custom[l.cid];
+      if (!old) return;
+      confirmTG(old.until ? 'Удалить всю серию «' + old.title + '»?' : 'Удалить пару «' + old.title + '»?', () => {
+        save({ custom: { [l.cid]: null } });
+        closeSheet();
+        toast('Пара удалена', () => save({ custom: { [l.cid]: old } }));
+      });
+      return;
+    }
+    if (act === 'f-kind' && formCtx) {
+      formCtx.kind = b.dataset.v;
+      document.querySelectorAll('#f-kinds .chip').forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.v === formCtx.kind)));
+      return;
+    }
+    if (act === 'f-repeat' && formCtx) {
+      formCtx.weekly = b.dataset.v === '1';
+      document.querySelectorAll('#f-repeats .chip').forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.v === b.dataset.v)));
+      document.getElementById('f-until-wrap').hidden = !formCtx.weekly;
+      const u = document.getElementById('f-until');
+      const dt = document.getElementById('f-date').value;
+      if (formCtx.weekly && !u.value && dt) u.value = addDays(dt, 56);   // по умолчанию 8 недель
+      return;
+    }
+    if (act === 'f-save' && formCtx) { saveForm(); return; }
     if (act === 'sheet-close') { closeSheet(); return; }
     if (act === 'color' && sheetCtx) {
       const i = Number(b.dataset.i);
@@ -716,7 +867,7 @@ summary { cursor: pointer; }
     if (e.target.id !== 'q') return;
     state.q = e.target.value; state.limit = 50;
     const r = document.getElementById('results');
-    if (r) r.innerHTML = resultsHTML((state.data[state.profile] || {}).lessons || []);
+    if (r) r.innerHTML = resultsHTML(allLessons());
   });
 
   document.addEventListener('keydown', (e) => {
