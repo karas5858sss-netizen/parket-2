@@ -1,7 +1,7 @@
 // api/state.js — общее хранилище ДЗ и отметок «пройдена» для двоих.
 //
 // GET  /api/state -> { who: 'me'|'her', docs: { me, her } }   (читать могут оба)
-// POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null} }
+// POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null}, colors: {ключ: 0..15|null} }
 //                    пишется ТОЛЬКО в документ того, кто прислал запрос
 //
 // Доступ: Telegram initData (подпись проверяется токеном бота) + белый список id.
@@ -26,9 +26,10 @@ const HW_MAX = 100;                // длина ДЗ
 const NAME_MAX = 120;
 const KEY_MAX = 160;
 const MAX_ENTRIES = 2000;
+const PALETTE_SIZE = 16;           // цветовых меток предметов
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-const emptyDoc = () => ({ hw: {}, done: {} });
+const emptyDoc = () => ({ hw: {}, done: {}, colors: {} });
 
 // ---------- проверка подписи Telegram ----------
 function verifyInitData(initData, botToken) {
@@ -68,7 +69,7 @@ async function getDoc(who) {
   if (!raw) return emptyDoc();
   try {
     const d = JSON.parse(raw);
-    return { hw: d.hw || {}, done: d.done || {} };
+    return { hw: d.hw || {}, done: d.done || {}, colors: d.colors || {} };
   } catch (e) { return emptyDoc(); }
 }
 
@@ -76,6 +77,8 @@ async function getDoc(who) {
 function applyPatch(doc, patch, now) {
   const hw = (patch && typeof patch.hw === 'object' && patch.hw) || {};
   const done = (patch && typeof patch.done === 'object' && patch.done) || {};
+  const colors = (patch && typeof patch.colors === 'object' && patch.colors) || {};
+  if (!doc.colors) doc.colors = {};
   for (const [k, v] of Object.entries(hw)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v === null || typeof v !== 'object') { delete doc.hw[k]; continue; }
@@ -87,6 +90,12 @@ function applyPatch(doc, patch, now) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v) doc.done[k] = now; else delete doc.done[k];
   }
+  for (const [k, v] of Object.entries(colors)) {
+    if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
+    if (Number.isInteger(v) && v >= 0 && v < PALETTE_SIZE) doc.colors[k] = v; else delete doc.colors[k];
+  }
+  const ckeys = Object.keys(doc.colors);
+  if (ckeys.length > MAX_ENTRIES) ckeys.slice(0, ckeys.length - MAX_ENTRIES).forEach((k) => delete doc.colors[k]);
   const keys = Object.keys(doc.done);
   if (keys.length > MAX_ENTRIES) {
     keys.sort((a, b) => doc.done[a] - doc.done[b]).slice(0, keys.length - MAX_ENTRIES).forEach((k) => delete doc.done[k]);
