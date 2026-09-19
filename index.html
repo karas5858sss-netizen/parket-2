@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ПАР·КЕТ</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>try{var t=localStorage.getItem("parket.theme");if(t==="dark"||t==="light"){document.documentElement.dataset.theme=t;document.documentElement.dataset.scheme=t;}}catch(e){}</script>
 <style>
 :root {
   --bg: var(--tg-theme-bg-color, #ffffff);
@@ -27,6 +28,12 @@
 }
 [data-scheme="dark"] { --accent-text: #6aa8f5; }
 [data-scheme="dark"][data-profile="her"] { --accent-text: #f2809c; }
+
+:root[data-theme="dark"] { --bg: #17181c; --surface: #23252b; --text: #eceef2; --hint: #9aa1ad; --line: rgba(255, 255, 255, .14); }
+:root[data-theme="light"] { --bg: #ffffff; --surface: #f0f1f4; --text: #14171c; --hint: #66707e; --line: rgba(127, 127, 127, .24); }
+:root[data-scheme="dark"] { color-scheme: dark; }
+:root[data-scheme="light"] { color-scheme: light; }
+
 
 * { box-sizing: border-box; margin: 0; }
 html, body {
@@ -176,6 +183,17 @@ summary { cursor: pointer; }
 .tile span { color: var(--hint); font-size: 13px; }
 .hwitem .due { color: var(--accent-text); font-weight: 600; }
 
+.top { display: flex; gap: 8px; align-items: stretch; }
+.top .switch { flex: 1; }
+.themebtn { padding: 0 14px; border-radius: 14px; background: var(--surface); font-size: 14px; }
+.partner { display: flex; gap: 10px; margin-top: 12px; padding: 12px; border-radius: 16px; background: var(--surface); }
+.partner .pd { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--pa); }
+.partner .ptl { font-weight: 600; }
+.joint { margin-top: 8px; padding: 12px; border-radius: 14px; background: var(--accent-soft); }
+.joint .cap { margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--accent-text); }
+.win { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.win span { color: var(--hint); }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
@@ -201,6 +219,33 @@ summary { cursor: pointer; }
   const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {} });
   const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {}, custom: (d && d.custom) || {} });
 
+  // ---------- тема: Как в Telegram / Светлая / Тёмная ----------
+  const THEME_BG = { light: '#ffffff', dark: '#17181c' };
+  const themePref = () => { const t = store.get('parket.theme'); return t === 'light' || t === 'dark' ? t : 'auto'; };
+  function applyTheme() {
+    const pref = themePref();
+    const root = document.documentElement;
+    let scheme;
+    if (pref === 'auto') {
+      delete root.dataset.theme;
+      scheme = (tg && tg.colorScheme) || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    } else {
+      root.dataset.theme = pref;
+      scheme = pref;
+    }
+    root.dataset.scheme = scheme;
+    if (tg) {
+      try {
+        const c = pref === 'auto' ? 'bg_color' : THEME_BG[pref];
+        tg.setHeaderColor(c);
+        tg.setBackgroundColor(c);
+        if (tg.setBottomBarColor && pref !== 'auto') tg.setBottomBarColor(c);
+      } catch (e) { /* старый клиент */ }
+    }
+  }
+  applyTheme();
+  if (tg && tg.onEvent) { try { tg.onEvent('themeChanged', () => { if (themePref() === 'auto') applyTheme(); }); } catch (e) {} }
+
   const cachedState = readJSON('parket.state', null);
   const pending = readJSON('parket.pending', {});
   pending.hw = pending.hw || {};
@@ -225,6 +270,8 @@ summary { cursor: pointer; }
     q: '', kind: 'all', onlyHw: false, past: false, limit: 50, // поиск
   };
   const LABEL = { me: 'Кирилл', her: 'Маша' };
+  const FREE = { me: 'свободен', her: 'свободна' };
+  const otherOf = (p) => (p === 'me' ? 'her' : 'me');
   const readCache = (p) => { try { return JSON.parse(store.get('parket.cache.' + p)); } catch (e) { return null; } };
   const writeCache = (p, d) => store.set('parket.cache.' + p, JSON.stringify(d));
 
@@ -322,6 +369,81 @@ summary { cursor: pointer; }
       `<button class="hwitem${colorOf(k) ? ' colored' : ''}"${colorOf(k) ? ` style="--c:${colorOf(k)}"` : ''} data-act="hw" data-sk="${esc(k)}"><b>${esc(v.name || k)}</b><span>${esc(v.text)}</span></button>`).join('');
   }
 
+
+  // ---------- партнёр: что делает сейчас, общие окна ----------
+  const DAY_FROM = 8 * 60, DAY_TO = 22 * 60, MIN_WINDOW = 30;
+  const fmtMin = (m) => pad(Math.floor(m / 60)) + ':' + pad(m % 60);
+  const roomBit = (l) => (l.room ? ', ауд. ' + (l.room.includes(' - ') ? l.room.split(' - ')[0] : l.room) : '');
+
+  function freeOf(profile, date) {
+    const busy = allLessons(profile).filter((l) => l.date === date).map((l) => [toMin(l.start), toMin(l.end)]).sort((a, b) => a[0] - b[0]);
+    const free = [];
+    let cur = DAY_FROM;
+    for (const [st, en] of busy) {
+      if (cur >= DAY_TO) break;
+      if (st > cur) free.push([cur, Math.min(st, DAY_TO)]);
+      cur = Math.max(cur, en);
+    }
+    if (cur < DAY_TO) free.push([cur, DAY_TO]);
+    return free;
+  }
+
+  function jointWindows(date) {
+    if (!state.data.me || !state.data.her) return null;
+    const a = freeOf('me', date);
+    const b = freeOf('her', date);
+    const now = nowStr();
+    const from = date === now.slice(0, 10) ? Math.max(DAY_FROM, toMin(now.slice(11, 16))) : DAY_FROM;
+    const out = [];
+    for (const [s1, e1] of a) {
+      for (const [s2, e2] of b) {
+        const st = Math.max(s1, s2, from);
+        const en = Math.min(e1, e2);
+        if (en - st >= MIN_WINDOW) out.push({ from: st, to: en });
+      }
+    }
+    return out.sort((x, y) => x.from - y.from);
+  }
+
+  function jointBlock(date) {
+    const w = jointWindows(date);
+    if (w === null) return '';
+    const body = w.length
+      ? w.map((x) => `<div class="win"><b>${fmtMin(x.from)}–${fmtMin(x.to)}</b><span>${dur(x.to - x.from)}</span></div>`).join('')
+      : '<div class="meta">Общих окон нет.</div>';
+    return `<section class="joint"><div class="cap">Свободны вместе, время московское</div>${body}</section>`;
+  }
+
+  function partnerCardHTML() {
+    if (!state.who || state.profile !== state.who) return '';
+    const pp = otherOf(state.who);
+    if (!state.data[pp]) return '';
+    const now = nowStr();
+    const today = now.slice(0, 10);
+    const day = allLessons(pp).filter((l) => l.date === today);
+    const name = LABEL[pp];
+    const cur = day.find((l) => l.startAt <= now && now < l.endAt);
+    const next = day.find((l) => l.startAt > now);
+    let head;
+    let sub = '';
+    if (cur) {
+      head = `${name} на паре до ${cur.end}`;
+      sub = cur.subject + roomBit(cur);
+    } else if (next) {
+      head = `${name} ${FREE[pp]} до ${next.start}`;
+      sub = 'Дальше: ' + next.subject + roomBit(next);
+    } else if (day.length) {
+      head = `${name} ${FREE[pp]}, пары закончились в ${day.reduce((m, l) => (l.end > m ? l.end : m), '00:00')}`;
+    } else {
+      head = `${name}: сегодня пар нет`;
+    }
+    const w = jointWindows(today);
+    let joint = '';
+    if (w) joint = w.length ? 'Вместе свободны: ' + w.slice(0, 3).map((x) => fmtMin(x.from) + '–' + fmtMin(x.to)).join(', ') : 'Общих окон сегодня больше нет';
+    return `<section class="partner" style="--pa:${pp === 'her' ? '#c93d63' : '#1f6fd1'}"><i class="pd"></i><div>` +
+      `<div class="ptl">${esc(head)}</div>${sub ? `<div class="meta">${esc(sub)}</div>` : ''}${joint ? `<div class="meta">${esc(joint)}</div>` : ''}</div></section>`;
+  }
+
   // ---------- экран «Сегодня» ----------
   function viewToday(all) {
     const now = nowStr();
@@ -330,7 +452,7 @@ summary { cursor: pointer; }
     const cur = day.find((l) => l.startAt <= now && now < l.endAt && !isDone(l));
     const upcoming = day.filter((l) => l.startAt > now && !isDone(l));
     const past = day.filter((l) => l.endAt <= now || isDone(l));
-    let html = '';
+    let html = partnerCardHTML();
     if (cur) {
       const a = ms(cur.startAt), b = ms(cur.endAt), n = ms(now);
       const pct = Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
@@ -375,7 +497,7 @@ summary { cursor: pointer; }
     html += '</div>';
     if (!days.includes(today)) html += '<button class="tolink" data-act="today">К сегодняшнему дню</button>';
     const list = all.filter((l) => l.date === state.selDate);
-    html += `<h2>${WD[dow(state.selDate)]}, ${human(state.selDate)}</h2>`;
+    html += `<h2>${WD[dow(state.selDate)]}, ${human(state.selDate)}</h2>` + jointBlock(state.selDate);
     html += list.length ? list.map(lessonHTML).join('') : '<div class="empty"><div class="ttl">В этот день пар нет</div></div>';
     return html;
   }
@@ -422,7 +544,7 @@ summary { cursor: pointer; }
     html += '<div class="ro">Красная точка: к этому дню нужно ДЗ</div>';
     if (state.calSel) {
       const list = all.filter((l) => l.date === state.calSel);
-      html += `<h2>${WD[dow(state.calSel)]}, ${human(state.calSel)}</h2>`;
+      html += `<h2>${WD[dow(state.calSel)]}, ${human(state.calSel)}</h2>` + jointBlock(state.calSel);
       html += list.length ? list.map(lessonHTML).join('') : '<div class="empty"><div class="ttl">В этот день пар нет</div></div>';
     } else {
       html += '<h2>Выбери день</h2>';
@@ -596,7 +718,7 @@ summary { cursor: pointer; }
     }
     const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
       `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${t}</button>`).join('');
-    app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
+    app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Оформление">Тема</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
     if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
   }
@@ -618,6 +740,18 @@ summary { cursor: pointer; }
       state.loading = false;
       if (state.profile === profile) render();
     }
+  }
+
+  async function loadQuiet(profile) {
+    if (!state.data[profile]) { const c = readCache(profile); if (c) { state.data[profile] = c; render(); } }
+    try {
+      const r = await fetch('/api/schedule?profile=' + profile);
+      if (!r.ok) return;
+      const j = await r.json();
+      state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
+      writeCache(profile, state.data[profile]);
+      render();
+    } catch (e) { /* второй профиль необязателен */ }
   }
 
   // ---------- общее хранилище: ДЗ и отметки ----------
@@ -750,6 +884,19 @@ summary { cursor: pointer; }
     if (ta) ta.addEventListener('input', () => { document.getElementById('cnt').textContent = ta.value.length; });
   }
 
+
+
+  function openThemeSheet() {
+    closeSheet();
+    const cur = themePref();
+    const chips = [['auto', 'Как в Telegram'], ['light', 'Светлая'], ['dark', 'Тёмная']].map(([v, t]) =>
+      `<button class="chip" data-act="theme-set" data-v="${v}" aria-pressed="${cur === v}">${t}</button>`).join('');
+    document.getElementById('sheet').innerHTML =
+      '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
+      `<div class="ttl">Оформление</div><label>Тема</label><div class="chips" id="themechips">${chips}</div>` +
+      '<div class="btns"><button class="btn" data-act="sheet-close">Готово</button></div></div>';
+    document.body.style.overflow = 'hidden';
+  }
 
   // ---------- форма «Своя пара» ----------
   function defaultDate() {
@@ -897,6 +1044,13 @@ summary { cursor: pointer; }
       return;
     }
     if (act === 'f-save' && formCtx) { saveForm(); return; }
+    if (act === 'theme') { openThemeSheet(); return; }
+    if (act === 'theme-set') {
+      store.set('parket.theme', b.dataset.v);
+      applyTheme();
+      document.querySelectorAll('#themechips .chip').forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.v === b.dataset.v)));
+      return;
+    }
     if (act === 'sheet-close') { closeSheet(); return; }
     if (act === 'color' && sheetCtx) {
       const i = Number(b.dataset.i);
@@ -959,6 +1113,7 @@ summary { cursor: pointer; }
       state.limit += 50; render();
     } else if (act === 'refresh') {
       load(state.profile);
+      loadQuiet(otherOf(state.profile));
       loadState().then(() => { render(); flush(); });
     }
     if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
@@ -995,10 +1150,12 @@ summary { cursor: pointer; }
   // ---------- старт ----------
   render();
   load(state.profile);
+  loadQuiet(otherOf(state.profile));
   loadState().then(() => {
     if (state.who && !state.userPicked && state.profile !== state.who) {
       state.profile = state.who; state.weekOf = null; state.selDate = null;
       load(state.profile);
+      loadQuiet(otherOf(state.profile));
     } else {
       render();
     }
