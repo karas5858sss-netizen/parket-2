@@ -1,7 +1,8 @@
 // api/state.js — общее хранилище ДЗ и отметок «пройдена» для двоих.
 //
 // GET  /api/state -> { who: 'me'|'her', docs: { me, her } }   (читать могут оба)
-// POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null}, colors: {ключ: 0..15|null} }
+// POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null}, colors: {ключ: 0..15|null},
+//                         custom: {id: {title,kind,date,start,end,room,teacher,until?,skip?}|null} }
 //                    пишется ТОЛЬКО в документ того, кто прислал запрос
 //
 // Доступ: Telegram initData (подпись проверяется токеном бота) + белый список id.
@@ -27,9 +28,14 @@ const NAME_MAX = 120;
 const KEY_MAX = 160;
 const MAX_ENTRIES = 2000;
 const PALETTE_SIZE = 16;           // цветовых меток предметов
+const MAX_CUSTOM = 300;            // своих пар (серий) на человека
+const KINDS = new Set(['', 'лек', 'пр', 'лаб']);
+const ID_RE = /^[a-z0-9_-]{1,40}$/i;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
-const emptyDoc = () => ({ hw: {}, done: {}, colors: {} });
+const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {} });
 
 // ---------- проверка подписи Telegram ----------
 function verifyInitData(initData, botToken) {
@@ -69,8 +75,38 @@ async function getDoc(who) {
   if (!raw) return emptyDoc();
   try {
     const d = JSON.parse(raw);
-    return { hw: d.hw || {}, done: d.done || {}, colors: d.colors || {} };
+    return { hw: d.hw || {}, done: d.done || {}, colors: d.colors || {}, custom: d.custom || {} };
   } catch (e) { return emptyDoc(); }
+}
+
+// ---------- своя пара: проверка и очистка ----------
+function validDate(s) {
+  if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+function cleanCustom(v, now) {
+  if (!v || typeof v !== 'object') return null;
+  const title = String(v.title || '').trim().slice(0, 80);
+  if (!title) return null;
+  const kind = KINDS.has(v.kind) ? v.kind : '';
+  if (!validDate(v.date) || !TIME_RE.test(v.start || '') || !TIME_RE.test(v.end || '') || v.end <= v.start) return null;
+  const out = {
+    title, kind, date: v.date, start: v.start, end: v.end,
+    room: String(v.room || '').trim().slice(0, 40),
+    teacher: String(v.teacher || '').trim().slice(0, 60),
+    t: now,
+  };
+  if (v.until) {
+    if (!validDate(v.until) || v.until < v.date) return null;
+    if ((Date.parse(v.until) - Date.parse(v.date)) / 864e5 > 400) return null;
+    out.until = v.until;
+  }
+  if (Array.isArray(v.skip)) {                              // пропущенные даты серии
+    const sk = v.skip.filter(validDate).slice(0, 80);
+    if (sk.length) out.skip = sk;
+  }
+  return out;
 }
 
 // ---------- применение патча ----------
@@ -78,7 +114,9 @@ function applyPatch(doc, patch, now) {
   const hw = (patch && typeof patch.hw === 'object' && patch.hw) || {};
   const done = (patch && typeof patch.done === 'object' && patch.done) || {};
   const colors = (patch && typeof patch.colors === 'object' && patch.colors) || {};
+  const custom = (patch && typeof patch.custom === 'object' && patch.custom) || {};
   if (!doc.colors) doc.colors = {};
+  if (!doc.custom) doc.custom = {};
   for (const [k, v] of Object.entries(hw)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v === null || typeof v !== 'object') { delete doc.hw[k]; continue; }
@@ -93,6 +131,14 @@ function applyPatch(doc, patch, now) {
   for (const [k, v] of Object.entries(colors)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (Number.isInteger(v) && v >= 0 && v < PALETTE_SIZE) doc.colors[k] = v; else delete doc.colors[k];
+  }
+  for (const [id, v] of Object.entries(custom)) {
+    if (!ID_RE.test(id) || BAD_KEYS.has(id)) continue;
+    if (v === null) { delete doc.custom[id]; continue; }
+    const c = cleanCustom(v, now);
+    if (!c) continue;                                       // некорректное молча пропускаем
+    if (!doc.custom[id] && Object.keys(doc.custom).length >= MAX_CUSTOM) continue;
+    doc.custom[id] = c;
   }
   const ckeys = Object.keys(doc.colors);
   if (ckeys.length > MAX_ENTRIES) ckeys.slice(0, ckeys.length - MAX_ENTRIES).forEach((k) => delete doc.colors[k]);
