@@ -97,11 +97,43 @@ summary { cursor: pointer; }
 .tabs button { padding: 14px 0; color: var(--hint); }
 .tabs button[aria-pressed="true"] { color: var(--accent-text); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
 
+
+[hidden] { display: none !important; }
+.lesson[data-act="open"] { cursor: pointer; }
+.lesson.isdone { opacity: .55; }
+.hw { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; padding: 5px 8px; border-radius: 8px; background: var(--accent-soft); font-size: 14px; }
+.hw .rd { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: #e5484d; }
+.okline { color: var(--accent-text); font-weight: 600; }
+.hwitem { display: block; width: 100%; margin-top: 8px; padding: 10px 12px; border-radius: 12px; background: var(--surface); text-align: left; }
+.hwitem b { display: block; font-size: 14px; }
+.hwitem span { display: block; margin-top: 2px; font-size: 14px; color: var(--hint); }
+.note { margin-top: 10px; padding: 8px 12px; border-radius: 12px; background: var(--surface); color: var(--hint); font-size: 13px; }
+.note.warn { background: rgba(229, 160, 40, .18); color: var(--text); }
+.ro { margin-top: 10px; color: var(--hint); font-size: 13px; text-align: center; }
+
+.sh-bg { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .45); }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-height: 88vh; overflow: auto; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); background: var(--bg); border-radius: 20px 20px 0 0; }
+.sheet .ttl { font-size: 17px; }
+.sheet label { display: block; margin-top: 14px; font-size: 13px; font-weight: 600; color: var(--hint); }
+.sheet label .cnt { float: right; font-weight: 400; }
+.sheet textarea { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; resize: none; }
+.sheet textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sheet .view { margin-top: 6px; padding: 10px 12px; border-radius: 12px; background: var(--surface); white-space: pre-wrap; }
+.btns { display: grid; gap: 8px; margin-top: 14px; }
+.btn { padding: 12px; border-radius: 12px; background: var(--surface); text-align: center; font-weight: 600; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.danger { color: #e5484d; }
+
+.toast { position: fixed; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 64px); z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-radius: 14px; background: #23272e; color: #fff; font-size: 14px; }
+.toast button { padding: 6px 10px; border-radius: 8px; background: rgba(255, 255, 255, .16); font-weight: 600; white-space: nowrap; }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
 <body>
 <div id="app"></div>
+<div id="sheet"></div>
+<div id="toast" class="toast" hidden></div>
 
 <script>
 (() => {
@@ -116,12 +148,25 @@ summary { cursor: pointer; }
     get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
+  const readJSON = (k, d) => { try { const v = JSON.parse(store.get(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const emptyDoc = () => ({ hw: {}, done: {} });
+  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {} });
+
+  const cachedState = readJSON('parket.state', null);
+  const pending = readJSON('parket.pending', {});
+  pending.hw = pending.hw || {};
+  pending.done = pending.done || {};
+
   const state = {
-    profile: store.get('parket.profile') === 'her' ? 'her' : 'me',
+    who: cachedState && cachedState.who ? cachedState.who : null, // чей это телефон: 'me' | 'her'
+    docs: cachedState && cachedState.docs ? { me: normDoc(cachedState.docs.me), her: normDoc(cachedState.docs.her) } : { me: emptyDoc(), her: emptyDoc() },
+    profile: (cachedState && cachedState.who) || (store.get('parket.profile') === 'her' ? 'her' : 'me'),
+    userPicked: false,
     tab: store.get('parket.tab') === 'week' ? 'week' : 'today',
     data: {},        // profile -> { lessons, group, fetchedAt, errors }
     err: null,
     loading: false,
+    sync: { code: 'idle' },
     weekOf: null,    // понедельник показанной недели
     selDate: null,   // выбранный день в «Неделе»
   };
@@ -150,10 +195,19 @@ summary { cursor: pointer; }
   const dur = (m) => (m < 60 ? m + ' мин' : Math.floor(m / 60) + ' ч' + (m % 60 ? ' ' + (m % 60) + ' мин' : ''));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  // ---------- ключи: ДЗ привязано к предмету, «пройдена» к конкретной паре ----------
+  const skey = (l) => l.subject.trim().toLowerCase().replace(/\s+/g, ' ');
+  const lkey = (l) => l.date + '|' + l.start + '|' + skey(l);
+  const curDoc = () => state.docs[state.profile] || emptyDoc();
+  const canEdit = () => !!state.who && state.who === state.profile;
+  const isDone = (l) => !!curDoc().done[lkey(l)];
+
   // ---------- карточка пары ----------
   function lessonHTML(l) {
     const kind = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[l.kind] || 'other';
     const badge = l.kind ? `<span class="badge k-${kind}">${esc(l.kind)}</span>` : '';
+    const doc = curDoc();
+    const hw = doc.hw[skey(l)];
     let meta = '';
     if (l.teacher) meta += `<div class="meta">${esc(l.teacher)}</div>`;
     if (l.room) {
@@ -165,8 +219,19 @@ summary { cursor: pointer; }
       meta += `<details><summary>Подгруппы ${v[0].n}–${v[v.length - 1].n}</summary><div class="vars">` +
         v.map((x) => `<div>п/г ${x.n}: ${esc(x.teacher)}, ${esc(x.room)}</div>`).join('') + '</div></details>';
     }
-    return `<article class="lesson"><div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
+    if (hw && !hw.done) meta += `<div class="hw"><i class="rd"></i><span>${esc(hw.text)}</span></div>`;
+    const done = !!doc.done[lkey(l)];
+    if (done) meta += '<div class="meta okline">✓ пройдена</div>';
+    return `<article class="lesson${done ? ' isdone' : ''}" tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
+      `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
       `<div><div class="ttl">${badge}${esc(l.subject)}</div>${meta}</div></article>`;
+  }
+
+  function hwListHTML() {
+    const items = Object.entries(curDoc().hw).filter(([, v]) => !v.done).sort((a, b) => (b[1].t || 0) - (a[1].t || 0));
+    if (!items.length) return '';
+    return '<h2>Активное ДЗ</h2>' + items.map(([k, v]) =>
+      `<button class="hwitem" data-act="hw" data-sk="${esc(k)}"><b>${esc(v.name || k)}</b><span>${esc(v.text)}</span></button>`).join('');
   }
 
   // ---------- экран «Сегодня» ----------
@@ -174,9 +239,9 @@ summary { cursor: pointer; }
     const now = nowStr();
     const today = now.slice(0, 10);
     const day = all.filter((l) => l.date === today);
-    const cur = day.find((l) => l.startAt <= now && now < l.endAt);
-    const upcoming = day.filter((l) => l.startAt > now);
-    const past = day.filter((l) => l.endAt <= now);
+    const cur = day.find((l) => l.startAt <= now && now < l.endAt && !isDone(l));
+    const upcoming = day.filter((l) => l.startAt > now && !isDone(l));
+    const past = day.filter((l) => l.endAt <= now || isDone(l));
     let html = '';
     if (cur) {
       const a = ms(cur.startAt), b = ms(cur.endAt), n = ms(now);
@@ -191,12 +256,13 @@ summary { cursor: pointer; }
     const rest = cur ? upcoming : upcoming.slice(1);
     if (rest.length) html += '<h2>Потом сегодня</h2>' + rest.map(lessonHTML).join('');
     if (!cur && !upcoming.length) {
-      const nxt = all.find((l) => l.startAt > now);
+      const nxt = all.find((l) => l.startAt > now && !isDone(l));
       html += `<div class="empty"><div class="ttl">${day.length ? 'На сегодня всё' : 'Сегодня пар нет'}</div>` +
         (nxt
           ? `<div class="meta">Дальше: ${WD[dow(nxt.date)]}, ${human(nxt.date)}, ${esc(nxt.start)}, ${esc(nxt.subject)}</div>`
           : '<div class="meta">Больше пар в расписании нет.</div>') + '</div>';
     }
+    html += hwListHTML();
     if (past.length) html += `<details class="past"><summary>Прошло сегодня: ${past.length}</summary>${past.map(lessonHTML).join('')}</details>`;
     return html;
   }
@@ -226,6 +292,16 @@ summary { cursor: pointer; }
     return html;
   }
 
+  // ---------- сообщения о состоянии общего хранилища ----------
+  function syncNote() {
+    const s = state.sync;
+    if (s.code === 'browser') return '<div class="note">ДЗ и отметки работают только внутри Telegram.</div>';
+    if (s.code === 'off') return '<div class="note warn">Общее хранилище ещё не настроено на сервере, ДЗ пока недоступно.</div>';
+    if (s.code === 'denied') return `<div class="note warn">Нет доступа к ДЗ. Твой Telegram ID: <b>${esc(s.id)}</b>. Его нужно добавить в ME_TG_ID или HER_TG_ID на Vercel.</div>`;
+    if (s.code === 'error') return `<div class="note">Не удалось получить ДЗ (${esc(s.msg || 'ошибка')}), показаны сохранённые.</div>`;
+    return '';
+  }
+
   // ---------- общий рендер ----------
   function render() {
     const app = document.getElementById('app');
@@ -236,7 +312,8 @@ summary { cursor: pointer; }
       const g = state.data[p] && state.data[p].group;
       return `<button data-act="profile" data-p="${p}" aria-pressed="${p === state.profile}">${LABEL[p]}<small>${esc(g || '')}</small></button>`;
     }).join('');
-    let body = '';
+    let body = syncNote();
+    if (state.who && state.who !== state.profile) body += `<div class="ro">Расписание ${esc(LABEL[state.profile])}: только просмотр</div>`;
     if (state.err) {
       body += `<div class="err">${d ? 'Не удалось обновить, показаны сохранённые данные.' : 'Не удалось загрузить расписание.'} (${esc(state.err)})` +
         '<br><button data-act="refresh">Повторить</button></div>';
@@ -247,7 +324,8 @@ summary { cursor: pointer; }
         ? new Date(d.fetchedAt).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })
         : '';
       const partial = d.errors && d.errors.length ? ' Часть недель не загрузилась.' : '';
-      body += `<div class="status"><span>${state.loading ? 'Обновляю…' : 'Обновлено в ' + t + partial}</span>` +
+      const pend = hasPending() ? ' Есть несохранённые изменения.' : '';
+      body += `<div class="status"><span>${state.loading ? 'Обновляю…' : 'Обновлено в ' + t + '.' + partial + pend}</span>` +
         '<button data-act="refresh">Обновить</button></div>';
     } else if (state.loading) {
       body += '<div class="empty"><div class="ttl">Загружаю расписание…</div></div>';
@@ -258,7 +336,7 @@ summary { cursor: pointer; }
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
   }
 
-  // ---------- загрузка ----------
+  // ---------- расписание ----------
   async function load(profile) {
     if (!state.data[profile]) { const c = readCache(profile); if (c) state.data[profile] = c; }
     state.loading = true; state.err = null;
@@ -277,12 +355,179 @@ summary { cursor: pointer; }
     }
   }
 
+  // ---------- общее хранилище: ДЗ и отметки ----------
+  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length > 0;
+  const persistState = () => store.set('parket.state', JSON.stringify({ who: state.who, docs: state.docs }));
+  const persistPending = () => store.set('parket.pending', JSON.stringify(pending));
+  let lastStateAt = 0;
+
+  function applyLocal(doc, patch) {
+    const now = Date.now();
+    for (const [k, v] of Object.entries(patch.hw || {})) {
+      if (!v || !v.text) delete doc.hw[k];
+      else doc.hw[k] = { name: v.name || '', text: v.text, done: !!v.done, t: now };
+    }
+    for (const [k, v] of Object.entries(patch.done || {})) {
+      if (v) doc.done[k] = now; else delete doc.done[k];
+    }
+  }
+
+  async function loadState() {
+    if (!tg || !tg.initData) { state.sync = { code: 'browser' }; return; }
+    try {
+      const r = await fetch('/api/state', { headers: { 'X-Init-Data': tg.initData }, cache: 'no-store' });
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 403) { state.sync = { code: 'denied', id: j.yourId }; return; }
+      if (r.status === 503) { state.sync = { code: 'off' }; return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state.who = j.who;
+      state.docs = { me: normDoc(j.docs && j.docs.me), her: normDoc(j.docs && j.docs.her) };
+      applyLocal(state.docs[state.who], pending); // несохранённые правки остаются поверх серверных данных
+      state.sync = { code: 'ok' };
+      lastStateAt = Date.now();
+      persistState();
+    } catch (e) {
+      state.sync = { code: 'error', msg: e.message };
+    }
+  }
+
+  let flushing = false;
+  async function flush() {
+    if (flushing || !tg || !tg.initData || !state.who || !hasPending()) return;
+    const snap = JSON.stringify(pending);
+    flushing = true;
+    try {
+      const r = await fetch('/api/state', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Init-Data': tg.initData },
+        body: snap,
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const sent = JSON.parse(snap);
+      for (const k of Object.keys(sent.hw)) if (JSON.stringify(pending.hw[k]) === JSON.stringify(sent.hw[k])) delete pending.hw[k];
+      for (const k of Object.keys(sent.done)) if (pending.done[k] === sent.done[k]) delete pending.done[k];
+      persistPending();
+    } catch (e) { /* останется в очереди, отправим при следующем случае */ }
+    finally { flushing = false; render(); }
+  }
+
+  function save(patch) {
+    if (!canEdit()) return;
+    applyLocal(state.docs[state.who], patch);
+    Object.assign(pending.hw, patch.hw || {});
+    Object.assign(pending.done, patch.done || {});
+    persistState(); persistPending();
+    render();
+    flush();
+  }
+  const saveHw = (sk, name, text, done) => save({ hw: { [sk]: text ? { name, text, done } : null } });
+
+  // ---------- нижний лист с ДЗ ----------
+  let sheetCtx = null;
+  function closeSheet() {
+    sheetCtx = null;
+    document.getElementById('sheet').innerHTML = '';
+    document.body.style.overflow = '';
+  }
+  function openSheet(o) {
+    const doc = curDoc();
+    const hw = doc.hw[o.sk];
+    const edit = canEdit();
+    const l = o.lesson;
+    sheetCtx = o;
+    const head = l
+      ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}</div>`
+      : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
+    let body;
+    if (edit) {
+      const text = hw ? hw.text : '';
+      body = `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/100</span>` +
+        `<textarea id="hwtext" rows="3" maxlength="100" placeholder="Что задали">${esc(text)}</textarea></label><div class="btns">` +
+        '<button class="btn primary" data-act="hw-save">Сохранить</button>' +
+        (hw ? `<button class="btn" data-act="hw-toggle">${hw.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
+              '<button class="btn danger" data-act="hw-del">Удалить ДЗ</button>' : '') +
+        (l ? `<button class="btn" data-act="lesson-done">${doc.done[lkey(l)] ? 'Снять отметку «пройдена»' : 'Отметить пару пройденной'}</button>` : '') +
+        '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
+    } else {
+      body = '<label>ДЗ по предмету</label><div class="view">' +
+        (hw && hw.text ? esc(hw.text) + (hw.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
+        '<div class="btns"><button class="btn" data-act="sheet-close">Закрыть</button></div>';
+    }
+    document.getElementById('sheet').innerHTML =
+      `<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">${head}${body}</div>`;
+    document.body.style.overflow = 'hidden';
+    const ta = document.getElementById('hwtext');
+    if (ta) ta.addEventListener('input', () => { document.getElementById('cnt').textContent = ta.value.length; });
+  }
+
+  function confirmTG(msg, ok) {
+    if (tg && tg.showConfirm) {
+      try { tg.showConfirm(msg, (r) => { if (r) ok(); }); return; } catch (e) { /* старый клиент */ }
+    }
+    if (window.confirm(msg)) ok();
+  }
+
+  // ---------- «отменить» на 20 секунд ----------
+  let toastTimer = null;
+  let undoFn = null;
+  function hideToast() {
+    clearInterval(toastTimer);
+    undoFn = null;
+    document.getElementById('toast').hidden = true;
+  }
+  function toast(msg, undo) {
+    clearInterval(toastTimer);
+    const el = document.getElementById('toast');
+    let left = 20;
+    undoFn = undo;
+    const paint = () => { el.innerHTML = `<span>${esc(msg)}</span><button data-act="undo">Отменить (${left})</button>`; };
+    el.hidden = false;
+    paint();
+    toastTimer = setInterval(() => { left -= 1; if (left <= 0) hideToast(); else paint(); }, 1000);
+  }
+
   // ---------- события ----------
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
+    if (act === 'open') {
+      if (e.target.closest('details')) return;
+      const all = (state.data[state.profile] || {}).lessons || [];
+      const l = all.find((x) => lkey(x) === b.dataset.k);
+      if (l) openSheet({ sk: skey(l), name: l.subject, lesson: l });
+      return;
+    }
+    if (act === 'hw') {
+      const h = curDoc().hw[b.dataset.sk];
+      openSheet({ sk: b.dataset.sk, name: h ? h.name : '', lesson: null });
+      return;
+    }
+    if (act === 'sheet-close') { closeSheet(); return; }
+    if (act === 'hw-save' && sheetCtx) {
+      const text = document.getElementById('hwtext').value.trim().slice(0, 100);
+      saveHw(sheetCtx.sk, sheetCtx.name, text, false); closeSheet(); return;
+    }
+    if (act === 'hw-toggle' && sheetCtx) {
+      const h = curDoc().hw[sheetCtx.sk];
+      if (h) saveHw(sheetCtx.sk, h.name || sheetCtx.name, h.text, !h.done);
+      closeSheet(); return;
+    }
+    if (act === 'hw-del' && sheetCtx) { save({ hw: { [sheetCtx.sk]: null } }); closeSheet(); return; }
+    if (act === 'lesson-done' && sheetCtx && sheetCtx.lesson) {
+      const l = sheetCtx.lesson;
+      const k = lkey(l);
+      if (curDoc().done[k]) { save({ done: { [k]: null } }); closeSheet(); return; }
+      confirmTG('Отметить пару «' + l.subject + '» пройденной?', () => {
+        save({ done: { [k]: true } });
+        closeSheet();
+        toast('Пара отмечена пройденной', () => save({ done: { [k]: null } }));
+      });
+      return;
+    }
+    if (act === 'undo') { const f = undoFn; hideToast(); if (f) f(); return; }
     if (act === 'profile' && b.dataset.p !== state.profile) {
+      state.userPicked = true;
       state.profile = b.dataset.p; state.weekOf = null; state.selDate = null;
       store.set('parket.profile', state.profile);
       load(state.profile);
@@ -296,18 +541,44 @@ summary { cursor: pointer; }
       state.weekOf = null; state.selDate = null; render();
     } else if (act === 'refresh') {
       load(state.profile);
+      loadState().then(() => { render(); flush(); });
     }
     if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
   });
 
-  setInterval(() => { if (!document.hidden && state.tab === 'today' && state.data[state.profile]) render(); }, 30000);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeSheet(); return; }
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.lesson[data-act="open"]')) {
+      e.preventDefault();
+      e.target.click();
+    }
+  });
+
+  setInterval(() => {
+    if (document.hidden) return;
+    if (hasPending()) flush();
+    if (state.tab === 'today' && state.data[state.profile]) render();
+  }, 30000);
+
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     const d = state.data[state.profile];
     if (d && Date.now() - Date.parse(d.fetchedAt) > 15 * 60000) load(state.profile); else render();
+    if (Date.now() - lastStateAt > 60000) loadState().then(() => { render(); flush(); });
   });
 
+  // ---------- старт ----------
+  render();
   load(state.profile);
+  loadState().then(() => {
+    if (state.who && !state.userPicked && state.profile !== state.who) {
+      state.profile = state.who; state.weekOf = null; state.selDate = null;
+      load(state.profile);
+    } else {
+      render();
+    }
+    flush();
+  });
 })();
 </script>
 </body>
