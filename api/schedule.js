@@ -10,9 +10,12 @@ const SOURCES = {
 };
 
 // Каждый учебный год вузы выдают новые id групп -> меняй groupId здесь.
+// subgroup: номер п/г для пар, которые вуз делит по подгруппам (напр. воен. подготовка).
+//   null  -> все п/г схлопываются в одну карточку (в variants лежат все варианты)
+//   число -> показывается только эта п/г
 const PROFILES = {
-  me: { label: 'Я', source: 'msgu', groupId: 338, groupName: 'Мо-24' },
-  her: { label: 'Она', source: 'donstu', groupId: 73381, groupName: 'ДСО12' },
+  me: { label: 'Я', source: 'msgu', groupId: 338, groupName: 'Мо-24', subgroup: null },
+  her: { label: 'Она', source: 'donstu', groupId: 73381, groupName: 'ДСО12', subgroup: null },
 };
 
 const TIMEOUT_MS = 8000;
@@ -90,6 +93,46 @@ function normalize(x) {
   };
 }
 
+// Вуз выкладывает п/г как отдельные пары с суффиксом ", п/г N" в названии.
+const SG = /,?\s*п\/г\s*(\d+)\s*$/i;
+
+function collapseSubgroups(lessons, wanted) {
+  const out = [];
+  const groups = new Map();
+  for (const l of lessons) {
+    const m = l.title.match(SG);
+    if (!m) {
+      out.push(l);
+      continue;
+    }
+    const n = Number(m[1]);
+    const base = {
+      ...l,
+      title: l.title.replace(SG, '').trim(),
+      subject: l.subject.replace(SG, '').trim(),
+    };
+    if (wanted) {
+      if (n === wanted) out.push({ ...base, subgroup: n });
+      continue;
+    }
+    const key = [l.date, l.start, l.end, base.title].join('|');
+    const v = { n, teacher: l.teacher, room: l.room };
+    const g = groups.get(key);
+    if (g) g.variants.push(v);
+    else {
+      const card = { ...base, subgroup: 0, variants: [v] };
+      groups.set(key, card);
+      out.push(card);
+    }
+  }
+  for (const g of groups.values()) {
+    g.variants.sort((a, b) => a.n - b.n);
+    g.teacher = '';
+    g.room = '';
+  }
+  return out;
+}
+
 // ---- handler ----
 module.exports = async (req, res) => {
   const key = String((req.query && req.query.profile) || '');
@@ -141,7 +184,8 @@ module.exports = async (req, res) => {
     if (r.e) errors.push({ sdate: sdates[i], error: r.e });
     else for (const x of r.v) byId.set(x['код'], normalize(x));
   });
-  const lessons = [...byId.values()].sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  const sorted = [...byId.values()].sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  const lessons = collapseSubgroups(sorted, p.subgroup);
 
   if (errors.length === sdates.length) {
     res.setHeader('Cache-Control', 'no-store');
