@@ -93,8 +93,8 @@ summary { cursor: pointer; }
 .status { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; color: var(--hint); font-size: 13px; }
 .status button { padding: 6px 10px; border-radius: 8px; background: var(--surface); color: var(--text); }
 
-.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
-.tabs button { padding: 14px 0; color: var(--hint); font-size: 15px; }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(5, 1fr); padding-bottom: env(safe-area-inset-bottom); background: var(--bg); border-top: 1px solid var(--line); }
+.tabs button { padding: 14px 0; color: var(--hint); font-size: 14px; }
 .tabs button[aria-pressed="true"] { color: var(--accent-text); font-weight: 600; box-shadow: inset 0 2px 0 var(--accent); }
 
 
@@ -161,6 +161,21 @@ summary { cursor: pointer; }
 .badge.k-own { background: transparent; color: var(--hint); box-shadow: inset 0 0 0 1px var(--line); }
 .fab { position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 72px); z-index: 10; width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 28px; line-height: 1; box-shadow: 0 4px 14px rgba(0, 0, 0, .28); }
 
+.stat { margin-top: 8px; padding: 14px; border-radius: 16px; background: var(--surface); }
+.stat .big { font-size: 34px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--accent-text); }
+.bar.thick { height: 10px; margin-top: 10px; }
+.subj, .dayrow { margin-top: 8px; padding: 12px; border-radius: 14px; background: var(--surface); }
+.subj.colored { box-shadow: inset 5px 0 0 var(--c); padding-left: 16px; }
+.rl { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.rl b { font-weight: 600; }
+.rl span { flex: none; color: var(--hint); font-variant-numeric: tabular-nums; }
+.subj .bar, .dayrow .bar { margin-top: 8px; }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.tile { padding: 12px; border-radius: 14px; background: var(--surface); }
+.tile b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+.tile span { color: var(--hint); font-size: 13px; }
+.hwitem .due { color: var(--accent-text); font-weight: 600; }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
@@ -198,7 +213,7 @@ summary { cursor: pointer; }
     docs: cachedState && cachedState.docs ? { me: normDoc(cachedState.docs.me), her: normDoc(cachedState.docs.her) } : { me: emptyDoc(), her: emptyDoc() },
     profile: (cachedState && cachedState.who) || (store.get('parket.profile') === 'her' ? 'her' : 'me'),
     userPicked: false,
-    tab: ['week', 'month', 'search'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
+    tab: ['week', 'month', 'search', 'stats'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
     data: {},        // profile -> { lessons, group, fetchedAt, errors }
     err: null,
     loading: false,
@@ -453,6 +468,92 @@ summary { cursor: pointer; }
       `<div id="results">${resultsHTML(all)}</div>`;
   }
 
+
+  // ---------- экран «Итоги» ----------
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+
+  function viewStats(all) {
+    if (!all.length) return '<div class="empty"><div class="ttl">Пока нет пар для статистики</div></div>';
+    const now = nowStr();
+    const today = now.slice(0, 10);
+    const doc = curDoc();
+    const total = all.length;
+    const passed = all.filter((l) => l.endAt <= now).length;
+    const pct = Math.round((passed / total) * 100);
+    const marked = all.filter((l) => doc.done[lkey(l)]).length;
+
+    // прогресс
+    let html = '<h2>Прогресс семестра</h2><div class="stat">' +
+      `<div class="big">${pct}%</div><div class="bar thick"><i style="width:${pct}%"></i></div>` +
+      `<div class="meta">Пройдено пар: ${passed} из ${total}. По расписанию с ${human(all[0].date)} по ${human(all[all.length - 1].date)}.` +
+      ` Отмечено вручную: ${marked}.</div></div>`;
+
+    // по предметам
+    const subj = new Map();
+    for (const l of all) {
+      const k = skey(l);
+      if (!subj.has(k)) subj.set(k, { name: l.subject, total: 0, passed: 0, kinds: {} });
+      const x = subj.get(k);
+      x.total += 1;
+      if (l.endAt <= now) x.passed += 1;
+      const kd = l.kind || 'другое';
+      x.kinds[kd] = (x.kinds[kd] || 0) + 1;
+    }
+    const rows = [...subj.entries()].sort((a, b) => b[1].total - a[1].total || a[1].name.localeCompare(b[1].name, 'ru'));
+    html += '<h2>По предметам</h2>' + rows.map(([k, x]) => {
+      const col = colorOf(k);
+      const w = Math.round((x.passed / x.total) * 100);
+      return `<div class="subj${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''}>` +
+        `<div class="rl"><b>${esc(x.name)}</b><span>${x.passed} из ${x.total}</span></div>` +
+        `<div class="bar"><i style="width:${w}%"></i></div>` +
+        `<div class="meta">${Object.entries(x.kinds).map(([kd, n]) => `${esc(kd)} ${n}`).join(', ')}</div></div>`;
+    }).join('');
+
+    // ДЗ
+    const hwAll = Object.entries(doc.hw);
+    const active = hwAll.filter(([, v]) => !v.done).map(([k, v]) => {
+      const nx = all.find((l) => l.startAt > now && skey(l) === k && !isDone(l));
+      return { k, name: v.name || k, text: v.text, due: nx ? nx.date : null };
+    }).sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : 0);
+    html += '<h2>ДЗ</h2><div class="tiles">' +
+      `<div class="tile"><b>${active.length}</b><span>активных</span></div>` +
+      `<div class="tile"><b>${hwAll.length - active.length}</b><span>выполнено</span></div></div>`;
+    html += active.map((a) => {
+      const col = colorOf(a.k);
+      return `<button class="hwitem${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} data-act="hw" data-sk="${esc(a.k)}">` +
+        `<b>${esc(a.name)}</b><span>${esc(a.text)}</span>` +
+        `<span class="due">${a.due ? 'Сдать к ' + WD[dow(a.due)] + ', ' + human(a.due) : 'Ближайших пар по предмету нет'}</span></button>`;
+    }).join('');
+
+    // нагрузка
+    const days = new Map();
+    for (const l of all) {
+      let d = days.get(l.date);
+      if (!d) { d = { date: l.date, n: 0, first: l.start, last: l.end }; days.set(l.date, d); }
+      d.n += 1;
+      if (l.start < d.first) d.first = l.start;
+      if (l.end > d.last) d.last = l.end;
+    }
+    const span = (d) => toMin(d.last) - toMin(d.first);
+    const top = [...days.values()].filter((d) => d.date >= today)
+      .sort((a, b) => b.n - a.n || span(b) - span(a) || (a.date < b.date ? -1 : 1)).slice(0, 5);
+    if (top.length) {
+      const maxN = top[0].n;
+      html += '<h2>Самые загруженные дни впереди</h2>' + top.map((d) =>
+        `<div class="dayrow"><div class="rl"><b>${WD[dow(d.date)]}, ${human(d.date)}</b><span>пар: ${d.n}</span></div>` +
+        `<div class="bar"><i style="width:${Math.round((d.n / maxN) * 100)}%"></i></div>` +
+        `<div class="meta">${esc(d.first)}–${esc(d.last)}</div></div>`).join('');
+    }
+    const byDow = [0, 0, 0, 0, 0, 0, 0];
+    for (const l of all) byDow[dow(l.date)] += 1;
+    const order = [1, 2, 3, 4, 5, 6, 0].filter((i, n) => n < 6 || byDow[i] > 0);
+    const maxD = Math.max.apply(null, order.map((i) => byDow[i])) || 1;
+    html += '<h2>Всего пар по дням недели</h2>' + order.map((i) =>
+      `<div class="dayrow"><div class="rl"><b>${WD[i]}</b><span>${byDow[i]}</span></div>` +
+      `<div class="bar"><i style="width:${Math.round((byDow[i] / maxD) * 100)}%"></i></div></div>`).join('');
+    return html;
+  }
+
   // ---------- сообщения о состоянии общего хранилища ----------
   function syncNote() {
     const s = state.sync;
@@ -482,7 +583,7 @@ summary { cursor: pointer; }
         '<br><button data-act="refresh">Повторить</button></div>';
     }
     if (d) {
-      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch }[state.tab](allLessons());
+      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch, stats: viewStats }[state.tab](allLessons());
       const t = d.fetchedAt
         ? new Date(d.fetchedAt).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })
         : '';
@@ -493,9 +594,9 @@ summary { cursor: pointer; }
     } else if (state.loading) {
       body += '<div class="empty"><div class="ttl">Загружаю расписание…</div></div>';
     }
-    const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск']].map(([k, t]) =>
+    const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
       `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${t}</button>`).join('');
-    app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
+    app.innerHTML = `<div class="switch">${sw}</div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
     if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
   }
