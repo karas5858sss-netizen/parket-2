@@ -143,6 +143,16 @@ summary { cursor: pointer; }
 .count { margin: 14px 2px 0; color: var(--hint); font-size: 13px; }
 .more { display: block; margin: 12px auto 0; padding: 8px 16px; border-radius: 10px; background: var(--surface); font-weight: 600; }
 
+.lesson.colored { box-shadow: inset 5px 0 0 var(--c); padding-left: 16px; }
+.hwitem.colored { box-shadow: inset 5px 0 0 var(--c); padding-left: 16px; }
+.swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: 8px; }
+.sw { position: relative; aspect-ratio: 1 / 1; min-height: 34px; border-radius: 50%; background: var(--c); }
+.sw[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+.sw[aria-pressed="true"]::after { content: "✓"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; text-shadow: 0 0 3px rgba(0, 0, 0, .55); }
+.sw.none { background: var(--surface); color: var(--hint); font-size: 18px; }
+.sw.none::before { content: "×"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.sw.none[aria-pressed="true"]::after { content: ""; }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
@@ -165,13 +175,14 @@ summary { cursor: pointer; }
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
   const readJSON = (k, d) => { try { const v = JSON.parse(store.get(k)); return v == null ? d : v; } catch (e) { return d; } };
-  const emptyDoc = () => ({ hw: {}, done: {} });
-  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {} });
+  const emptyDoc = () => ({ hw: {}, done: {}, colors: {} });
+  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {} });
 
   const cachedState = readJSON('parket.state', null);
   const pending = readJSON('parket.pending', {});
   pending.hw = pending.hw || {};
   pending.done = pending.done || {};
+  pending.colors = pending.colors || {};
 
   const state = {
     who: cachedState && cachedState.who ? cachedState.who : null, // чей это телефон: 'me' | 'her'
@@ -215,6 +226,15 @@ summary { cursor: pointer; }
   const dur = (m) => (m < 60 ? m + ' мин' : Math.floor(m / 60) + ' ч' + (m % 60 ? ' ' + (m % 60) + ' мин' : ''));
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  // ---------- цветовые метки предметов (16) ----------
+  const PALETTE = [
+    ['#e5484d', 'красный'], ['#f08a24', 'оранжевый'], ['#e0b000', 'янтарный'], ['#8fbf2a', 'лаймовый'],
+    ['#2fa35a', 'зелёный'], ['#12a594', 'изумрудный'], ['#16b0c9', 'бирюзовый'], ['#3b9cf0', 'голубой'],
+    ['#3e63dd', 'синий'], ['#6e56cf', 'индиго'], ['#9b51e0', 'фиолетовый'], ['#c94fc0', 'пурпурный'],
+    ['#e5508f', 'розовый'], ['#b5654a', 'терракотовый'], ['#7b8794', 'серый'], ['#c2a878', 'песочный'],
+  ];
+  const colorOf = (sk) => { const i = curDoc().colors[sk]; return Number.isInteger(i) && PALETTE[i] ? PALETTE[i][0] : null; };
+
   // ---------- ключи: ДЗ привязано к предмету, «пройдена» к конкретной паре ----------
   const skey = (l) => l.subject.trim().toLowerCase().replace(/\s+/g, ' ');
   const lkey = (l) => l.date + '|' + l.start + '|' + skey(l);
@@ -242,7 +262,8 @@ summary { cursor: pointer; }
     if (hw && !hw.done) meta += `<div class="hw"><i class="rd"></i><span>${esc(hw.text)}</span></div>`;
     const done = !!doc.done[lkey(l)];
     if (done) meta += '<div class="meta okline">✓ пройдена</div>';
-    return `<article class="lesson${done ? ' isdone' : ''}" tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
+    const col = colorOf(skey(l));
+    return `<article class="lesson${done ? ' isdone' : ''}${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
       `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
       `<div><div class="ttl">${badge}${esc(l.subject)}</div>${meta}</div></article>`;
   }
@@ -251,7 +272,7 @@ summary { cursor: pointer; }
     const items = Object.entries(curDoc().hw).filter(([, v]) => !v.done).sort((a, b) => (b[1].t || 0) - (a[1].t || 0));
     if (!items.length) return '';
     return '<h2>Активное ДЗ</h2>' + items.map(([k, v]) =>
-      `<button class="hwitem" data-act="hw" data-sk="${esc(k)}"><b>${esc(v.name || k)}</b><span>${esc(v.text)}</span></button>`).join('');
+      `<button class="hwitem${colorOf(k) ? ' colored' : ''}"${colorOf(k) ? ` style="--c:${colorOf(k)}"` : ''} data-act="hw" data-sk="${esc(k)}"><b>${esc(v.name || k)}</b><span>${esc(v.text)}</span></button>`).join('');
   }
 
   // ---------- экран «Сегодня» ----------
@@ -467,7 +488,7 @@ summary { cursor: pointer; }
   }
 
   // ---------- общее хранилище: ДЗ и отметки ----------
-  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length > 0;
+  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length > 0;
   const persistState = () => store.set('parket.state', JSON.stringify({ who: state.who, docs: state.docs }));
   const persistPending = () => store.set('parket.pending', JSON.stringify(pending));
   let lastStateAt = 0;
@@ -480,6 +501,10 @@ summary { cursor: pointer; }
     }
     for (const [k, v] of Object.entries(patch.done || {})) {
       if (v) doc.done[k] = now; else delete doc.done[k];
+    }
+    if (!doc.colors) doc.colors = {};
+    for (const [k, v] of Object.entries(patch.colors || {})) {
+      if (Number.isInteger(v) && v >= 0 && v < PALETTE.length) doc.colors[k] = v; else delete doc.colors[k];
     }
   }
 
@@ -517,6 +542,7 @@ summary { cursor: pointer; }
       const sent = JSON.parse(snap);
       for (const k of Object.keys(sent.hw)) if (JSON.stringify(pending.hw[k]) === JSON.stringify(sent.hw[k])) delete pending.hw[k];
       for (const k of Object.keys(sent.done)) if (pending.done[k] === sent.done[k]) delete pending.done[k];
+      for (const k of Object.keys(sent.colors || {})) if (pending.colors[k] === sent.colors[k]) delete pending.colors[k];
       persistPending();
     } catch (e) { /* останется в очереди, отправим при следующем случае */ }
     finally { flushing = false; render(); }
@@ -527,6 +553,7 @@ summary { cursor: pointer; }
     applyLocal(state.docs[state.who], patch);
     Object.assign(pending.hw, patch.hw || {});
     Object.assign(pending.done, patch.done || {});
+    Object.assign(pending.colors, patch.colors || {});
     persistState(); persistPending();
     render();
     flush();
@@ -552,8 +579,12 @@ summary { cursor: pointer; }
     let body;
     if (edit) {
       const text = hw ? hw.text : '';
+      const cur = doc.colors[o.sk];
+      const sws = PALETTE.map(([c, n], i) => `<button class="sw" style="--c:${c}" data-act="color" data-i="${i}" aria-label="${n}" aria-pressed="${cur === i}"></button>`).join('') +
+        `<button class="sw none" data-act="color" data-i="-1" aria-label="без цвета" aria-pressed="${!Number.isInteger(cur)}"></button>`;
       body = `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/100</span>` +
-        `<textarea id="hwtext" rows="3" maxlength="100" placeholder="Что задали">${esc(text)}</textarea></label><div class="btns">` +
+        `<textarea id="hwtext" rows="3" maxlength="100" placeholder="Что задали">${esc(text)}</textarea></label>` +
+        `<label>Цвет предмета</label><div class="swatches" id="swatches">${sws}</div><div class="btns">` +
         '<button class="btn primary" data-act="hw-save">Сохранить</button>' +
         (hw ? `<button class="btn" data-act="hw-toggle">${hw.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
               '<button class="btn danger" data-act="hw-del">Удалить ДЗ</button>' : '') +
@@ -615,6 +646,16 @@ summary { cursor: pointer; }
       return;
     }
     if (act === 'sheet-close') { closeSheet(); return; }
+    if (act === 'color' && sheetCtx) {
+      const i = Number(b.dataset.i);
+      save({ colors: { [sheetCtx.sk]: i >= 0 ? i : null } });
+      const cur = curDoc().colors[sheetCtx.sk];
+      document.querySelectorAll('#swatches .sw').forEach((el) => {
+        const n = Number(el.dataset.i);
+        el.setAttribute('aria-pressed', String(n < 0 ? !Number.isInteger(cur) : n === cur));
+      });
+      return;
+    }
     if (act === 'hw-save' && sheetCtx) {
       const text = document.getElementById('hwtext').value.trim().slice(0, 100);
       saveHw(sheetCtx.sk, sheetCtx.name, text, false); closeSheet(); return;
