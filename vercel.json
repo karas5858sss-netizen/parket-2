@@ -1,3 +1,9 @@
 {
-  "regions": ["fra1"]
+  "regions": ["fra1"],
+  "functions": {
+    "api/notify.js": { "maxDuration": 30 }
+  },
+  "crons": [
+    { "path": "/api/notify", "schedule": "0 17 * * *" }
+  ]
 }
