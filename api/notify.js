@@ -9,6 +9,9 @@
 
 const { cfg, verifyInitData, getDoc, safeEqual } = require('../lib/shared');
 const { buildDigest, mskNow, addDays } = require('../lib/digest');
+const { refreshChanges } = require('../lib/detect');
+
+const CHANGES_WINDOW_MS = 30 * 3600 * 1000; // в сообщение попадает то, что найдено после прошлого вечернего
 
 const FETCH_TIMEOUT_MS = 9000;
 
@@ -88,6 +91,17 @@ module.exports = async (req, res) => {
     return res.status(502).json({ error: 'storage_failed', message: String((e && e.message) || e) });
   }
 
+  // журнал изменений: сначала сверяем расписание, потом берём непрочитанные свежие записи
+  let logs = { me: [], her: [] };
+  try {
+    logs = (await refreshChanges({ base, today: now.slice(0, 10), nowIso: new Date(Date.now()).toISOString() })).items;
+  } catch (e) { /* без изменений письмо всё равно уйдёт */ }
+  const since = new Date(Date.now() - CHANGES_WINDOW_MS).toISOString();
+  const changesFor = (who) => {
+    const seen = (docs[who].prefs && docs[who].prefs.seen && docs[who].prefs.seen[who]) || '';
+    return (logs[who] || []).filter((e) => e.t > seen && e.t >= since && (e.type === 'published' || !e.date || e.date >= now.slice(0, 10)));
+  };
+
   const results = [];
   for (const who of targets) {
     if (!manual && docs[who].prefs && docs[who].prefs.notify === false) { results.push({ who, skipped: 'disabled' }); continue; }
@@ -95,7 +109,7 @@ module.exports = async (req, res) => {
     const chatId = c.tgId[who];
     if (!chatId) { results.push({ who, error: 'no_telegram_id' }); continue; }
     try {
-      await sendTelegram(c.botToken, chatId, buildDigest({ who, date, now, schedules, docs }), base);
+      await sendTelegram(c.botToken, chatId, buildDigest({ who, date, now, schedules, docs, changes: changesFor(who) }), base);
       results.push({ who, sent: true });
     } catch (e) {
       results.push({ who, error: String((e && e.message) || e) });
