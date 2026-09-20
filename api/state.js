@@ -2,7 +2,8 @@
 //
 // GET  /api/state -> { who: 'me'|'her', docs: { me, her } }   (читать могут оба)
 // POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null}, colors: {ключ: 0..15|null},
-//                         custom: {id: {title,kind,date,start,end,room,teacher,until?,skip?}|null} }
+//                         custom: {id: {title,kind,date,start,end,room,teacher,until?,skip?}|null},
+//                         prefs: {notify: true|false} }
 //                    пишется ТОЛЬКО в документ того, кто прислал запрос
 //
 // Доступ: Telegram initData (подпись проверяется токеном бота) + белый список id.
@@ -12,17 +13,8 @@
 //   HER_TG_ID   — Telegram id Маши
 //   Upstash Redis: UPSTASH_REDIS_REST_URL / _TOKEN  или  KV_REST_API_URL / _TOKEN (ставятся сами при подключении базы)
 
-const crypto = require('crypto');
+const { cfg, verifyInitData, redis, docKey, getDoc } = require('../lib/shared');
 
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-const BOT_TOKEN = process.env.BOT_TOKEN;
-
-const OWNERS = {};
-if (process.env.ME_TG_ID) OWNERS[String(process.env.ME_TG_ID).trim()] = 'me';
-if (process.env.HER_TG_ID) OWNERS[String(process.env.HER_TG_ID).trim()] = 'her';
-
-const MAX_AGE_SEC = 2 * 24 * 3600; // initData считаем свежей двое суток
 const HW_MAX = 100;                // длина ДЗ
 const NAME_MAX = 120;
 const KEY_MAX = 160;
@@ -34,50 +26,6 @@ const ID_RE = /^[a-z0-9_-]{1,40}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
-
-const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {} });
-
-// ---------- проверка подписи Telegram ----------
-function verifyInitData(initData, botToken) {
-  if (!initData) return null;
-  const p = new URLSearchParams(initData);
-  const hash = p.get('hash');
-  if (!hash) return null;
-  p.delete('hash');
-  const check = [...p.entries()]
-    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-    .map(([k, v]) => `${k}=${v}`)
-    .join('\n');
-  const secret = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
-  const calc = crypto.createHmac('sha256', secret).update(check).digest('hex');
-  const a = Buffer.from(calc);
-  const b = Buffer.from(hash);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  const age = Date.now() / 1000 - Number(p.get('auth_date') || 0);
-  if (!(age >= -60 && age <= MAX_AGE_SEC)) return null;
-  try { return JSON.parse(p.get('user') || 'null'); } catch (e) { return null; }
-}
-
-// ---------- Redis (REST) ----------
-async function redis(cmd) {
-  const r = await fetch(REDIS_URL, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify(cmd),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new Error(j.error || 'redis HTTP ' + r.status);
-  return j.result;
-}
-const docKey = (who) => 'parket:v1:doc:' + who;
-async function getDoc(who) {
-  const raw = await redis(['GET', docKey(who)]);
-  if (!raw) return emptyDoc();
-  try {
-    const d = JSON.parse(raw);
-    return { hw: d.hw || {}, done: d.done || {}, colors: d.colors || {}, custom: d.custom || {} };
-  } catch (e) { return emptyDoc(); }
-}
 
 // ---------- своя пара: проверка и очистка ----------
 function validDate(s) {
@@ -115,8 +63,11 @@ function applyPatch(doc, patch, now) {
   const done = (patch && typeof patch.done === 'object' && patch.done) || {};
   const colors = (patch && typeof patch.colors === 'object' && patch.colors) || {};
   const custom = (patch && typeof patch.custom === 'object' && patch.custom) || {};
+  const prefs = (patch && typeof patch.prefs === 'object' && patch.prefs) || {};
   if (!doc.colors) doc.colors = {};
   if (!doc.custom) doc.custom = {};
+  if (!doc.prefs) doc.prefs = {};
+  if (typeof prefs.notify === 'boolean') doc.prefs.notify = prefs.notify;
   for (const [k, v] of Object.entries(hw)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v === null || typeof v !== 'object') { delete doc.hw[k]; continue; }
@@ -161,14 +112,15 @@ function parseBody(req) {
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
 
+  const c = cfg();
   const missing = [];
-  if (!BOT_TOKEN) missing.push('BOT_TOKEN');
-  if (!REDIS_URL || !REDIS_TOKEN) missing.push('Upstash Redis');
+  if (!c.botToken) missing.push('BOT_TOKEN');
+  if (!c.redisUrl || !c.redisToken) missing.push('Upstash Redis');
   if (missing.length) return res.status(503).json({ error: 'not_configured', missing });
 
-  const user = verifyInitData(String(req.headers['x-init-data'] || ''), BOT_TOKEN);
+  const user = verifyInitData(String(req.headers['x-init-data'] || ''), c.botToken);
   if (!user) return res.status(401).json({ error: 'unauthorized' });
-  const who = OWNERS[String(user.id)];
+  const who = c.owners[String(user.id)];
   if (!who) return res.status(403).json({ error: 'not_allowed', yourId: user.id });
 
   try {
