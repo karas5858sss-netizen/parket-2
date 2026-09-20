@@ -194,7 +194,7 @@ summary { cursor: pointer; }
 .win { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-variant-numeric: tabular-nums; }
 .win span { color: var(--hint); }
 
-.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 12px; padding: 3px; border-radius: 12px; background: var(--surface); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 12px; padding: 3px; border-radius: 12px; background: var(--surface); }
 .seg button { padding: 8px; border-radius: 9px; font-size: 14px; }
 .seg button[aria-pressed="true"] { background: var(--bg); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
 
@@ -205,6 +205,16 @@ summary { cursor: pointer; }
 .chgitem.new::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #e5484d; }
 .chg .btn { margin-top: 8px; width: 100%; }
 .badge.k-chg { background: #b96f00; }
+
+.t span { display: block; }
+.t .pn { margin-top: 2px; font-size: 12px; }
+.subjrow { display: block; margin-top: 8px; padding: 12px; border-radius: 14px; background: var(--surface); cursor: pointer; }
+.subjrow.colored { box-shadow: inset 5px 0 0 var(--c); padding-left: 16px; }
+.subjrow .sname { min-width: 0; font-weight: 600; }
+.subjrow .when { flex: none; text-align: right; }
+.subjrow .when b { display: block; font-weight: 600; }
+.subjrow .when span { display: block; font-size: 13px; }
+.subjrow .hw { margin-top: 6px; }
 
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
@@ -271,7 +281,7 @@ summary { cursor: pointer; }
     docs: cachedState && cachedState.docs ? { me: normDoc(cachedState.docs.me), her: normDoc(cachedState.docs.her) } : { me: emptyDoc(), her: emptyDoc() },
     profile: (cachedState && cachedState.who) || (store.get('parket.profile') === 'her' ? 'her' : 'me'),
     userPicked: false,
-    tab: ['week', 'month', 'search', 'stats'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
+    tab: ['week', 'month', 'subjects', 'search', 'stats'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
     data: {},        // profile -> { lessons, group, fetchedAt, errors }
     err: null,
     loading: false,
@@ -281,7 +291,7 @@ summary { cursor: pointer; }
     selDate: null,   // выбранный день в «Неделе»
     month: null,     // показанный месяц 'YYYY-MM'
     calSel: null,    // выбранный день в «Месяце»
-    calMode: store.get('parket.calmode') === 'month' ? 'month' : 'week', // масштаб вкладки «Календарь»
+    calMode: ['month', 'subjects'].includes(store.get('parket.calmode')) ? store.get('parket.calmode') : 'week', // масштаб вкладки «Календарь»
     q: '', kind: 'all', onlyHw: false, past: false, limit: 50, // поиск
   };
   const LABEL = { me: 'Кирилл', her: 'Маша' };
@@ -384,6 +394,19 @@ summary { cursor: pointer; }
       '<button class="btn" data-act="chg-read">Прочитано</button></section>';
   }
 
+  // ---------- нумерация пар: у каждого своя сетка (копия в lib/slots.js) ----------
+  const SLOTS = {
+    me: [['08:00', '09:30'], ['09:40', '11:10'], ['11:50', '13:20'], ['13:30', '15:00'], ['15:40', '17:10'], ['17:20', '18:50']],
+    her: [['08:30', '10:05'], ['10:15', '11:50'], ['12:00', '13:35'], ['14:15', '15:50'], ['16:00', '17:35']],
+  };
+  function pairNo(l, profile) {
+    const i = (SLOTS[profile || state.profile] || []).findIndex((sl) => sl[0] === l.start);
+    if (i >= 0) return i + 1;
+    return !l.custom && l.num > 0 ? l.num : 0;   // не по сетке: номер из расписания вуза, у своих пар без номера
+  }
+  const plural = (n, f) => { const a = n % 100; const b = n % 10; return f[a > 10 && a < 20 ? 2 : b === 1 ? 0 : b >= 2 && b <= 4 ? 1 : 2]; };
+  const KIND_CLS = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' };
+
   // ---------- карточка пары ----------
   function lessonHTML(l) {
     const kind = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[l.kind] || 'other';
@@ -409,7 +432,7 @@ summary { cursor: pointer; }
     const chgBadge = chg ? `<span class="badge k-chg" title="${esc(chg.text)}">${{ moved: 'перенесена', changed: 'изменено', added: 'новая' }[chg.type]}</span>` : '';
     if (chg && chg.type === 'moved' && chg.was) meta += `<div class="meta">Было: ${WD[dow(chg.was.d)]}, ${human(chg.was.d)}, ${esc(chg.was.s)}</div>`;
     return `<article class="lesson${done ? ' isdone' : ''}${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
-      `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
+      `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span>${pairNo(l) ? `<span class="pn">${pairNo(l)} пара</span>` : ''}</div>` +
       `<div><div class="ttl">${badge}${chgBadge}${l.custom ? '<span class="badge k-own">своя</span>' : ''}${esc(l.subject)}</div>${meta}</div></article>`;
   }
 
@@ -533,7 +556,7 @@ summary { cursor: pointer; }
   // ---------- «Календарь»: переключатель масштаба ----------
   function calSeg() {
     return '<div class="seg" role="group" aria-label="Масштаб календаря">' +
-      [['week', 'Неделя'], ['month', 'Месяц']].map(([k, t]) => `<button data-act="tab" data-tab="${k}" aria-pressed="${state.tab === k}">${t}</button>`).join('') + '</div>';
+      [['week', 'Неделя'], ['month', 'Месяц'], ['subjects', 'Предметы']].map(([k, t]) => `<button data-act="tab" data-tab="${k}" aria-pressed="${state.tab === k}">${t}</button>`).join('') + '</div>';
   }
 
   // ---------- экран «Неделя» ----------
@@ -650,6 +673,56 @@ summary { cursor: pointer; }
   }
 
 
+
+  // ---------- «Предметы»: что на носу, по ближайшему занятию ----------
+  function viewSubjects(all) {
+    const now = nowStr();
+    const today = now.slice(0, 10);
+    const doc = curDoc();
+    const subj = new Map();
+    for (const l of all) {
+      const k = skey(l);
+      if (!subj.has(k)) subj.set(k, { k, name: l.subject, next: null, left: 0 });
+      const x = subj.get(k);
+      if (l.endAt > now && !isDone(l)) { x.left += 1; if (!x.next) x.next = l; }
+    }
+    if (!subj.size) return calSeg() + '<div class="empty"><div class="ttl">Расписание пока пустое</div></div>';
+    const list = [...subj.values()];
+    const byName = (a, b) => a.name.localeCompare(b.name, 'ru');
+    const soon = list.filter((x) => x.next).sort((a, b) => (a.next.startAt < b.next.startAt ? -1 : a.next.startAt > b.next.startAt ? 1 : byName(a, b)));
+    const gone = list.filter((x) => !x.next).sort(byName);
+    const dayN = (d) => Math.round((dOf(d) - dOf(today)) / 864e5);
+    let html = calSeg();
+    if (!soon.length) html += '<div class="empty"><div class="ttl">Ближайших занятий нет</div></div>';
+    else {
+      html += `<h2>Ближайшие занятия по предметам: ${soon.length}</h2>` + soon.map((x) => {
+        const l = x.next;
+        const n = dayN(l.date);
+        const top = n === 0 ? 'Сегодня' : n === 1 ? 'Завтра' : `${WD[dow(l.date)]}, ${human(l.date)}`;
+        const sub = n === 0 && l.startAt <= now ? 'идёт сейчас' : n >= 2 ? `через ${n} ${plural(n, ['день', 'дня', 'дней'])}` : '';
+        const kind = l.kind ? `<span class="badge k-${KIND_CLS[l.kind] || 'other'}">${esc(l.kind)}</span>` : '';
+        const chg = changeFor(l);
+        const chgB = chg ? `<span class="badge k-chg">${{ moved: 'перенесена', changed: 'изменено', added: 'новая' }[chg.type]}</span>` : '';
+        const own = l.custom ? '<span class="badge k-own">своя</span>' : '';
+        const col = colorOf(x.k);
+        const hw = doc.hw[x.k];
+        const pn = pairNo(l);
+        return `<article class="subjrow${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
+          `<div class="rl"><div class="sname">${kind}${chgB}${own}${esc(x.name)}</div><div class="when"><b>${top}</b>${sub ? `<span>${sub}</span>` : ''}</div></div>` +
+          `<div class="meta">${pn ? pn + ' пара, ' : ''}${esc(l.start)}–${esc(l.end)}${esc(roomBit(l))}</div>` +
+          (hw && !hw.done ? `<div class="hw"><i class="rd"></i><span>${esc(hw.text)}</span></div>` : '') +
+          `<div class="meta">Осталось занятий: ${x.left}</div></article>`;
+      }).join('');
+    }
+    if (gone.length) {
+      html += `<details class="past"><summary>Занятий больше нет: ${gone.length}</summary>` + gone.map((x) => {
+        const col = colorOf(x.k);
+        return `<div class="subj${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''}><div class="rl"><b>${esc(x.name)}</b></div></div>`;
+      }).join('') + '</details>';
+    }
+    return html;
+  }
+
   // ---------- экран «Итоги» ----------
   const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
 
@@ -764,7 +837,7 @@ summary { cursor: pointer; }
         '<br><button data-act="refresh">Повторить</button></div>';
     }
     if (d) {
-      body += { today: viewToday, week: viewWeek, month: viewMonth, search: viewSearch, stats: viewStats }[state.tab](allLessons());
+      body += { today: viewToday, week: viewWeek, month: viewMonth, subjects: viewSubjects, search: viewSearch, stats: viewStats }[state.tab](allLessons());
       const t = d.fetchedAt
         ? new Date(d.fetchedAt).toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' })
         : '';
@@ -776,7 +849,7 @@ summary { cursor: pointer; }
       body += '<div class="empty"><div class="ttl">Загружаю расписание…</div></div>';
     }
     const tabs = [['today', 'Сегодня'], ['cal', 'Календарь'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
-      `<button data-act="tab" data-tab="${k}" aria-pressed="${k === (state.tab === 'week' || state.tab === 'month' ? 'cal' : state.tab)}">${t}</button>`).join('');
+      `<button data-act="tab" data-tab="${k}" aria-pressed="${k === (state.tab === 'week' || state.tab === 'month' || state.tab === 'subjects' ? 'cal' : state.tab)}">${t}</button>`).join('');
     app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
     if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
@@ -944,7 +1017,7 @@ summary { cursor: pointer; }
         `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : 'Удалить пару'}</button>`
       : '';
     const head = l
-      ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}</div>${own}`
+      ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(l) ? ', ' + pairNo(l) + ' пара' : ''}</div>${own}`
       : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
     let body;
     if (edit) {
@@ -1040,6 +1113,8 @@ summary { cursor: pointer; }
       `<label>Дата<input id="f-date" class="in" type="date" value="${esc(v.date)}"></label>` +
       `<div class="row2"><label>Начало<input id="f-start" class="in" type="time" value="${esc(v.start)}"></label>` +
       `<label>Конец<input id="f-end" class="in" type="time" value="${esc(v.end)}"></label></div>` +
+      '<label>Номер пары (подставит время)</label><div class="chips" id="f-slots">' +
+      (SLOTS[state.profile] || []).map(([st, en], i) => `<button class="chip" type="button" data-act="f-slot" data-v="${i}" aria-pressed="${v.start === st && v.end === en}">${i + 1}</button>`).join('') + '</div>' +
       `<label>Аудитория<input id="f-room" class="in" maxlength="40" autocomplete="off" value="${esc(v.room)}"></label>` +
       `<label>Преподаватель<input id="f-teacher" class="in" maxlength="60" autocomplete="off" value="${esc(v.teacher)}"></label>` +
       `<label>Повтор</label><div class="chips" id="f-repeats">${chips('f-repeat', [['0', 'Не повторять'], ['1', 'Каждую неделю']], formCtx.weekly ? '1' : '0')}</div>` +
@@ -1047,6 +1122,16 @@ summary { cursor: pointer; }
       '<div class="err" id="f-err" hidden></div>' +
       '<div class="btns"><button class="btn primary" data-act="f-save">Сохранить</button><button class="btn" data-act="sheet-close">Отмена</button></div></div>';
     document.body.style.overflow = 'hidden';
+  }
+
+  function refreshSlotChips() {
+    const st = document.getElementById('f-start');
+    const en = document.getElementById('f-end');
+    if (!st || !en) return;
+    document.querySelectorAll('#f-slots .chip').forEach((el) => {
+      const sl = (SLOTS[state.profile] || [])[Number(el.dataset.v)];
+      el.setAttribute('aria-pressed', String(!!sl && sl[0] === st.value && sl[1] === en.value));
+    });
   }
 
   function saveForm() {
@@ -1163,6 +1248,11 @@ summary { cursor: pointer; }
       if (formCtx.weekly && !u.value && dt) u.value = addDays(dt, 56);   // по умолчанию 8 недель
       return;
     }
+    if (act === 'f-slot' && formCtx) {
+      const sl = (SLOTS[state.profile] || [])[Number(b.dataset.v)];
+      if (sl) { document.getElementById('f-start').value = sl[0]; document.getElementById('f-end').value = sl[1]; refreshSlotChips(); }
+      return;
+    }
     if (act === 'f-save' && formCtx) { saveForm(); return; }
     if (act === 'theme') { openSettings(); return; }
     if (act === 'notify-set') {
@@ -1223,7 +1313,7 @@ summary { cursor: pointer; }
     } else if (act === 'tab') {
       let tb = b.dataset.tab;
       if (tb === 'cal') tb = state.calMode;                       // «Календарь» открывается в последнем масштабе
-      if (tb === 'week' || tb === 'month') { state.calMode = tb; store.set('parket.calmode', tb); }
+      if (tb === 'week' || tb === 'month' || tb === 'subjects') { state.calMode = tb; store.set('parket.calmode', tb); }
       state.tab = tb; store.set('parket.tab', tb); render();
     } else if (act === 'prev' || act === 'next') {
       state.weekOf = addDays(state.weekOf, act === 'next' ? 7 : -7); state.selDate = null; render();
@@ -1255,6 +1345,7 @@ summary { cursor: pointer; }
   });
 
   document.addEventListener('input', (e) => {
+    if (e.target.id === 'f-start' || e.target.id === 'f-end') { refreshSlotChips(); return; }
     if (e.target.id !== 'q') return;
     state.q = e.target.value; state.limit = 50;
     const r = document.getElementById('results');
@@ -1263,7 +1354,7 @@ summary { cursor: pointer; }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeSheet(); return; }
-    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.lesson[data-act="open"]')) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('.lesson[data-act="open"], .subjrow[data-act="open"]')) {
       e.preventDefault();
       e.target.click();
     }
