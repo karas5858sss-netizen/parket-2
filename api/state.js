@@ -3,11 +3,11 @@
 // GET  /api/state -> { who: 'me'|'her', docs: { me, her } }   (читать могут оба)
 // POST /api/state -> тело { hw: {ключ: {name,text,done}|null}, done: {ключ: true|null}, colors: {ключ: 0..15|null},
 //                         custom: {id: {title,kind,date,start,end,room,teacher,until?,skip?}|null},
-//                         prefs: {notify: true|false} }
+//                         prefs: {notify: true|false, seen: {me: ISO, her: ISO}} }
 //                    пишется ТОЛЬКО в документ того, кто прислал запрос
 //
 // Доступ: Telegram initData (подпись проверяется токеном бота) + белый список id.
-// Переменные окружения на Vercel: 
+// Переменные окружения на Vercel:
 //   BOT_TOKEN   — токен бота из @BotFather (секрет, только сюда)
 //   ME_TG_ID    — Telegram id Кирилла
 //   HER_TG_ID   — Telegram id Маши
@@ -68,6 +68,14 @@ function applyPatch(doc, patch, now) {
   if (!doc.custom) doc.custom = {};
   if (!doc.prefs) doc.prefs = {};
   if (typeof prefs.notify === 'boolean') doc.prefs.notify = prefs.notify;
+  if (prefs.seen && typeof prefs.seen === 'object') {          // «прочитано» по журналу изменений: время последней просмотренной записи
+    for (const k of ['me', 'her']) {
+      const v = prefs.seen[k];
+      if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(v)) continue;
+      const cur = doc.prefs.seen && doc.prefs.seen[k];
+      if (!cur || v > cur) { doc.prefs.seen = doc.prefs.seen || {}; doc.prefs.seen[k] = v; }
+    }
+  }
   for (const [k, v] of Object.entries(hw)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v === null || typeof v !== 'object') { delete doc.hw[k]; continue; }
