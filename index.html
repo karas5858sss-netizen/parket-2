@@ -198,6 +198,14 @@ summary { cursor: pointer; }
 .seg button { padding: 8px; border-radius: 9px; font-size: 14px; }
 .seg button[aria-pressed="true"] { background: var(--bg); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
 
+.chg { margin-top: 12px; padding: 12px; border-radius: 16px; background: rgba(229, 160, 40, .18); }
+.chg .cap { margin-bottom: 4px; font-weight: 600; }
+.chgitem { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.chgitem:first-of-type { border-top: 0; }
+.chgitem.new::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #e5484d; }
+.chg .btn { margin-top: 8px; width: 100%; }
+.badge.k-chg { background: #b96f00; }
+
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
 </style>
 </head>
@@ -268,6 +276,7 @@ summary { cursor: pointer; }
     err: null,
     loading: false,
     sync: { code: 'idle' },
+    changes: readJSON('parket.changes', { me: [], her: [] }),   // журнал изменений расписания
     weekOf: null,    // понедельник показанной недели
     selDate: null,   // выбранный день в «Неделе»
     month: null,     // показанный месяц 'YYYY-MM'
@@ -342,6 +351,39 @@ summary { cursor: pointer; }
     return base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
   }
 
+
+  // ---------- журнал изменений расписания ----------
+  const GEN = { me: 'Кирилла', her: 'Маши' };
+  const changesOf = (p) => (state.changes && state.changes[p]) || [];
+  const seenOf = (p) => { const d = state.who && state.docs[state.who]; return (d && d.prefs && d.prefs.seen && d.prefs.seen[p]) || ''; };
+  const relevantChanges = (p) => {
+    const today = nowStr().slice(0, 10);
+    return changesOf(p).filter((e) => e.type === 'published' || !e.date || e.date >= today);
+  };
+  const unseenChanges = (p) => relevantChanges(p).filter((e) => e.t > seenOf(p));
+
+  function changeFor(l) {
+    if (l.custom) return null;
+    return unseenChanges(state.profile).find((x) => x.lid === String(l.id) && (x.type === 'moved' || x.type === 'changed' || x.type === 'added')) || null;
+  }
+
+  function changesBlock() {
+    const p = state.profile;
+    const list = relevantChanges(p);
+    if (!list.length || !state.who) return '';
+    const seen = seenOf(p);
+    const unseen = list.filter((e) => e.t > seen);
+    const row = (e) => `<div class="chgitem${e.t > seen ? ' new' : ''}">${esc(e.text)}</div>`;
+    if (!unseen.length) {
+      return `<details class="past"><summary>Прошлые изменения: ${list.length}</summary>${list.slice(0, 10).map(row).join('')}</details>`;
+    }
+    const who = p === state.who ? 'Что изменилось' : 'Что изменилось у ' + GEN[p];
+    return `<section class="chg"><div class="cap">${who}: новых ${unseen.length}</div>` +
+      unseen.slice(0, 8).map(row).join('') +
+      (unseen.length > 8 ? `<div class="meta">и ещё ${unseen.length - 8}</div>` : '') +
+      '<button class="btn" data-act="chg-read">Прочитано</button></section>';
+  }
+
   // ---------- карточка пары ----------
   function lessonHTML(l) {
     const kind = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[l.kind] || 'other';
@@ -363,9 +405,12 @@ summary { cursor: pointer; }
     const done = !!doc.done[lkey(l)];
     if (done) meta += '<div class="meta okline">✓ пройдена</div>';
     const col = colorOf(skey(l));
+    const chg = changeFor(l);
+    const chgBadge = chg ? `<span class="badge k-chg" title="${esc(chg.text)}">${{ moved: 'перенесена', changed: 'изменено', added: 'новая' }[chg.type]}</span>` : '';
+    if (chg && chg.type === 'moved' && chg.was) meta += `<div class="meta">Было: ${WD[dow(chg.was.d)]}, ${human(chg.was.d)}, ${esc(chg.was.s)}</div>`;
     return `<article class="lesson${done ? ' isdone' : ''}${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
       `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span></div>` +
-      `<div><div class="ttl">${badge}${l.custom ? '<span class="badge k-own">своя</span>' : ''}${esc(l.subject)}</div>${meta}</div></article>`;
+      `<div><div class="ttl">${badge}${chgBadge}${l.custom ? '<span class="badge k-own">своя</span>' : ''}${esc(l.subject)}</div>${meta}</div></article>`;
   }
 
   function hwListHTML() {
@@ -443,11 +488,13 @@ summary { cursor: pointer; }
     } else {
       head = `${name}: сегодня пар нет`;
     }
+    const pu = unseenChanges(pp).length;
+    const chgLine = pu ? `В расписании ${GEN[pp]} есть изменения: ${pu}` : '';
     const w = jointWindows(today);
     let joint = '';
     if (w) joint = w.length ? 'Вместе свободны: ' + w.slice(0, 3).map((x) => fmtMin(x.from) + '–' + fmtMin(x.to)).join(', ') : 'Общих окон сегодня больше нет';
     return `<section class="partner" style="--pa:${pp === 'her' ? '#c93d63' : '#1f6fd1'}"><i class="pd"></i><div>` +
-      `<div class="ptl">${esc(head)}</div>${sub ? `<div class="meta">${esc(sub)}</div>` : ''}${joint ? `<div class="meta">${esc(joint)}</div>` : ''}</div></section>`;
+      `<div class="ptl">${esc(head)}</div>${sub ? `<div class="meta">${esc(sub)}</div>` : ''}${joint ? `<div class="meta">${esc(joint)}</div>` : ''}${chgLine ? `<div class="meta">${esc(chgLine)}</div>` : ''}</div></section>`;
   }
 
   // ---------- экран «Сегодня» ----------
@@ -458,7 +505,7 @@ summary { cursor: pointer; }
     const cur = day.find((l) => l.startAt <= now && now < l.endAt && !isDone(l));
     const upcoming = day.filter((l) => l.startAt > now && !isDone(l));
     const past = day.filter((l) => l.endAt <= now || isDone(l));
-    let html = partnerCardHTML();
+    let html = changesBlock() + partnerCardHTML();
     if (cur) {
       const a = ms(cur.startAt), b = ms(cur.endAt), n = ms(now);
       const pct = Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
@@ -754,6 +801,19 @@ summary { cursor: pointer; }
     }
   }
 
+  let lastChangesAt = 0;
+  async function loadChanges() {
+    if (!tg || !tg.initData || !state.who) return;
+    try {
+      const r = await fetch('/api/changes', { headers: { 'X-Init-Data': tg.initData }, cache: 'no-store' });
+      if (!r.ok) return;
+      const j = await r.json();
+      state.changes = { me: (j.items && j.items.me) || [], her: (j.items && j.items.her) || [] };
+      store.set('parket.changes', JSON.stringify(state.changes));
+      lastChangesAt = Date.now();
+    } catch (e) { /* журнал необязателен */ }
+  }
+
   async function loadQuiet(profile) {
     if (!state.data[profile]) { const c = readCache(profile); if (c) { state.data[profile] = c; render(); } }
     try {
@@ -783,6 +843,7 @@ summary { cursor: pointer; }
     }
     if (!doc.prefs) doc.prefs = {};
     if (patch.prefs && typeof patch.prefs.notify === 'boolean') doc.prefs.notify = patch.prefs.notify;
+    if (patch.prefs && patch.prefs.seen) doc.prefs.seen = Object.assign({}, doc.prefs.seen, patch.prefs.seen);
     if (!doc.custom) doc.custom = {};
     for (const [k, v] of Object.entries(patch.custom || {})) {
       if (v) doc.custom[k] = Object.assign({}, v, { t: now }); else delete doc.custom[k];
@@ -829,7 +890,7 @@ summary { cursor: pointer; }
       for (const k of Object.keys(sent.done)) if (pending.done[k] === sent.done[k]) delete pending.done[k];
       for (const k of Object.keys(sent.colors || {})) if (pending.colors[k] === sent.colors[k]) delete pending.colors[k];
       for (const k of Object.keys(sent.custom || {})) if (JSON.stringify(pending.custom[k]) === JSON.stringify(sent.custom[k])) delete pending.custom[k];
-      for (const k of Object.keys(sent.prefs || {})) if (pending.prefs[k] === sent.prefs[k]) delete pending.prefs[k];
+      for (const k of Object.keys(sent.prefs || {})) if (JSON.stringify(pending.prefs[k]) === JSON.stringify(sent.prefs[k])) delete pending.prefs[k];
       persistPending();
     } catch (e) { /* останется в очереди, отправим при следующем случае */ }
     finally { flushing = false; render(); }
@@ -850,7 +911,9 @@ summary { cursor: pointer; }
   function savePref(patch) {
     if (!state.who) return;
     applyLocal(state.docs[state.who], patch);
-    Object.assign(pending.prefs, patch.prefs || {});
+    const pp = patch.prefs || {};
+    if (typeof pp.notify === 'boolean') pending.prefs.notify = pp.notify;
+    if (pp.seen) pending.prefs.seen = Object.assign({}, pending.prefs.seen, pp.seen);
     persistState(); persistPending();
     render();
     flush();
@@ -1114,6 +1177,11 @@ summary { cursor: pointer; }
       document.querySelectorAll('#themechips .chip').forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.v === b.dataset.v)));
       return;
     }
+    if (act === 'chg-read') {
+      const latest = relevantChanges(state.profile).reduce((m, e) => (e.t > m ? e.t : m), '');
+      if (latest) savePref({ prefs: { seen: { [state.profile]: latest } } });
+      return;
+    }
     if (act === 'sheet-close') { closeSheet(); return; }
     if (act === 'color' && sheetCtx) {
       const i = Number(b.dataset.i);
@@ -1180,6 +1248,7 @@ summary { cursor: pointer; }
     } else if (act === 'refresh') {
       load(state.profile);
       loadQuiet(otherOf(state.profile));
+      loadChanges().then(render);
       loadState().then(() => { render(); flush(); });
     }
     if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
@@ -1211,6 +1280,7 @@ summary { cursor: pointer; }
     const d = state.data[state.profile];
     if (d && Date.now() - Date.parse(d.fetchedAt) > 15 * 60000) load(state.profile); else render();
     if (Date.now() - lastStateAt > 60000) loadState().then(() => { render(); flush(); });
+    if (Date.now() - lastChangesAt > 5 * 60000) loadChanges().then(render);
   });
 
   // ---------- старт ----------
@@ -1226,6 +1296,7 @@ summary { cursor: pointer; }
       render();
     }
     flush();
+    loadChanges().then(render);
   });
 })();
 </script>
