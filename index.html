@@ -216,8 +216,8 @@ summary { cursor: pointer; }
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
   };
   const readJSON = (k, d) => { try { const v = JSON.parse(store.get(k)); return v == null ? d : v; } catch (e) { return d; } };
-  const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {} });
-  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {}, custom: (d && d.custom) || {} });
+  const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {}, prefs: {} });
+  const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {}, custom: (d && d.custom) || {}, prefs: (d && d.prefs) || {} });
 
   // ---------- тема: Как в Telegram / Светлая / Тёмная ----------
   const THEME_BG = { light: '#ffffff', dark: '#17181c' };
@@ -252,6 +252,7 @@ summary { cursor: pointer; }
   pending.done = pending.done || {};
   pending.colors = pending.colors || {};
   pending.custom = pending.custom || {};
+  pending.prefs = pending.prefs || {};
 
   const state = {
     who: cachedState && cachedState.who ? cachedState.who : null, // чей это телефон: 'me' | 'her'
@@ -371,7 +372,7 @@ summary { cursor: pointer; }
 
 
   // ---------- партнёр: что делает сейчас, общие окна ----------
-  const DAY_FROM = 8 * 60, DAY_TO = 22 * 60, MIN_WINDOW = 30;
+  const DAY_FROM = 8 * 60, DAY_TO = 22 * 60, MIN_WINDOW = 60;
   const fmtMin = (m) => pad(Math.floor(m / 60)) + ':' + pad(m % 60);
   const roomBit = (l) => (l.room ? ', ауд. ' + (l.room.includes(' - ') ? l.room.split(' - ')[0] : l.room) : '');
 
@@ -411,7 +412,7 @@ summary { cursor: pointer; }
     const body = w.length
       ? w.map((x) => `<div class="win"><b>${fmtMin(x.from)}–${fmtMin(x.to)}</b><span>${dur(x.to - x.from)}</span></div>`).join('')
       : '<div class="meta">Общих окон нет.</div>';
-    return `<section class="joint"><div class="cap">Свободны вместе, время московское</div>${body}</section>`;
+    return `<section class="joint"><div class="cap">Свободны вместе (окна от 1 ч), время московское</div>${body}</section>`;
   }
 
   function partnerCardHTML() {
@@ -718,7 +719,7 @@ summary { cursor: pointer; }
     }
     const tabs = [['today', 'Сегодня'], ['week', 'Неделя'], ['month', 'Месяц'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
       `<button data-act="tab" data-tab="${k}" aria-pressed="${k === state.tab}">${t}</button>`).join('');
-    app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Оформление">Тема</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
+    app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
     app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
     if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
   }
@@ -755,7 +756,7 @@ summary { cursor: pointer; }
   }
 
   // ---------- общее хранилище: ДЗ и отметки ----------
-  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length + Object.keys(pending.custom).length > 0;
+  const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length + Object.keys(pending.custom).length + Object.keys(pending.prefs).length > 0;
   const persistState = () => store.set('parket.state', JSON.stringify({ who: state.who, docs: state.docs }));
   const persistPending = () => store.set('parket.pending', JSON.stringify(pending));
   let lastStateAt = 0;
@@ -769,6 +770,8 @@ summary { cursor: pointer; }
     for (const [k, v] of Object.entries(patch.done || {})) {
       if (v) doc.done[k] = now; else delete doc.done[k];
     }
+    if (!doc.prefs) doc.prefs = {};
+    if (patch.prefs && typeof patch.prefs.notify === 'boolean') doc.prefs.notify = patch.prefs.notify;
     if (!doc.custom) doc.custom = {};
     for (const [k, v] of Object.entries(patch.custom || {})) {
       if (v) doc.custom[k] = Object.assign({}, v, { t: now }); else delete doc.custom[k];
@@ -815,6 +818,7 @@ summary { cursor: pointer; }
       for (const k of Object.keys(sent.done)) if (pending.done[k] === sent.done[k]) delete pending.done[k];
       for (const k of Object.keys(sent.colors || {})) if (pending.colors[k] === sent.colors[k]) delete pending.colors[k];
       for (const k of Object.keys(sent.custom || {})) if (JSON.stringify(pending.custom[k]) === JSON.stringify(sent.custom[k])) delete pending.custom[k];
+      for (const k of Object.keys(sent.prefs || {})) if (pending.prefs[k] === sent.prefs[k]) delete pending.prefs[k];
       persistPending();
     } catch (e) { /* останется в очереди, отправим при следующем случае */ }
     finally { flushing = false; render(); }
@@ -831,6 +835,16 @@ summary { cursor: pointer; }
     render();
     flush();
   }
+  // настройки относятся к владельцу телефона и сохраняются, даже если открыт профиль партнёра
+  function savePref(patch) {
+    if (!state.who) return;
+    applyLocal(state.docs[state.who], patch);
+    Object.assign(pending.prefs, patch.prefs || {});
+    persistState(); persistPending();
+    render();
+    flush();
+  }
+  const notifyOn = () => !!state.who && state.docs[state.who].prefs.notify !== false;
   const saveHw = (sk, name, text, done) => save({ hw: { [sk]: text ? { name, text, done } : null } });
 
   // ---------- нижний лист с ДЗ ----------
@@ -886,16 +900,48 @@ summary { cursor: pointer; }
 
 
 
-  function openThemeSheet() {
+  function openSettings() {
     closeSheet();
     const cur = themePref();
     const chips = [['auto', 'Как в Telegram'], ['light', 'Светлая'], ['dark', 'Тёмная']].map(([v, t]) =>
       `<button class="chip" data-act="theme-set" data-v="${v}" aria-pressed="${cur === v}">${t}</button>`).join('');
+    let notify;
+    if (state.who && tg && tg.initData) {
+      const on = notifyOn();
+      notify = '<label>Вечернее напоминание в Telegram</label><div class="chips" id="notifychips">' +
+        `<button class="chip" data-act="notify-set" data-v="1" aria-pressed="${on}">Включено</button>` +
+        `<button class="chip" data-act="notify-set" data-v="0" aria-pressed="${!on}">Выключено</button></div>` +
+        '<div class="meta">Каждый вечер около 20:00 по Москве бот присылает: твои пары на завтра, всё активное ДЗ и время занятости второго человека.</div>' +
+        '<div class="btns"><button class="btn" id="notify-test" data-act="notify-test">Прислать пример сейчас</button></div>' +
+        '<div class="meta" id="notify-status" role="status"></div>';
+    } else {
+      notify = '<label>Вечернее напоминание в Telegram</label><div class="meta">Работает только внутри Telegram, когда сервер настроен.</div>';
+    }
     document.getElementById('sheet').innerHTML =
       '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
-      `<div class="ttl">Оформление</div><label>Тема</label><div class="chips" id="themechips">${chips}</div>` +
+      `<div class="ttl">Настройки</div><label>Тема</label><div class="chips" id="themechips">${chips}</div>${notify}` +
       '<div class="btns"><button class="btn" data-act="sheet-close">Готово</button></div></div>';
     document.body.style.overflow = 'hidden';
+  }
+
+  async function sendTestNotify() {
+    const btn = document.getElementById('notify-test');
+    const box = document.getElementById('notify-status');
+    if (!btn || !box) return;
+    btn.disabled = true;
+    box.textContent = 'Отправляю…';
+    try {
+      const r = await fetch('/api/notify', { method: 'POST', headers: { 'X-Init-Data': tg.initData } });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok) box.textContent = 'Отправлено, посмотри чат с ботом.';
+      else if (/blocked|initiate|chat not found|deactivated/i.test(j.error || '')) box.textContent = 'Бот не может тебе написать. Открой чат с ботом и нажми Start.';
+      else if (r.status === 503) box.textContent = 'На сервере не хватает настроек: ' + ((j.missing || []).join(', ') || 'проверь переменные') + '.';
+      else box.textContent = 'Не получилось отправить (' + (j.error || 'HTTP ' + r.status) + ').';
+    } catch (e) {
+      box.textContent = 'Нет связи с сервером.';
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   // ---------- форма «Своя пара» ----------
@@ -1044,7 +1090,13 @@ summary { cursor: pointer; }
       return;
     }
     if (act === 'f-save' && formCtx) { saveForm(); return; }
-    if (act === 'theme') { openThemeSheet(); return; }
+    if (act === 'theme') { openSettings(); return; }
+    if (act === 'notify-set') {
+      savePref({ prefs: { notify: b.dataset.v === '1' } });
+      document.querySelectorAll('#notifychips .chip').forEach((el) => el.setAttribute('aria-pressed', String((el.dataset.v === '1') === notifyOn())));
+      return;
+    }
+    if (act === 'notify-test') { sendTestNotify(); return; }
     if (act === 'theme-set') {
       store.set('parket.theme', b.dataset.v);
       applyTheme();
