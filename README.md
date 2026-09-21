@@ -68,7 +68,7 @@ npm test
 ## Если что-то пошло не так
 
 **Напоминание в 20:00 не пришло.** На бесплатном плане Vercel запускает cron в любой момент внутри часа (20:00–20:59 по Москве).
-1. Есть ли `CRON_SECRET` в Production (Settings → Environment Variables)? Без него cron получает отказ.
+1. Есть ли `CRON_SECRET` в Production (Settings → Environment Variables)? Без него cron получает отказ (ответ 503), хотя «Прислать пример сейчас» работает. Эта кнопка в «Настройках» сама предупредит, если переменной нет.
 2. Settings → Cron Jobs: есть ли `/api/notify`? Кнопка **Run** запускает его сразу.
 3. Project → Logs, фильтр по `/api/notify`: строка `notify {...}` показывает, что произошло с каждым из двоих
    (`sent`, `skipped: disabled` это выключено в «Настройках», `schedule_unavailable`, ошибка Telegram).
