@@ -68,6 +68,14 @@ const pressed = (t, sel) => t.d.querySelector(sel).getAttribute('aria-pressed') 
   ok('не настроен сервер: показано, чего не хватает', t.d.getElementById('notify-status').textContent.includes('BOT_TOKEN'));
   ok('кнопка снова доступна после ответа', !t.d.getElementById('notify-test').disabled);
   t.close();
+  t = await boot({ notifyResp: { status: 200, body: { ok: true, cronReady: false } } });
+  await t.click('.themebtn'); await t.click('#notify-test');
+  ok('нет CRON_SECRET: «Отправлено», но с предупреждением про вечернюю отправку', t.d.getElementById('notify-status').textContent.includes('Отправлено') && t.d.getElementById('notify-status').textContent.includes('CRON_SECRET'), t.d.getElementById('notify-status').textContent);
+  t.close();
+  t = await boot({ notifyResp: { status: 200, body: { ok: true, cronReady: true } } });
+  await t.click('.themebtn'); await t.click('#notify-test');
+  ok('всё настроено: только «Отправлено», без предупреждений', t.d.getElementById('notify-status').textContent === 'Отправлено, посмотри чат с ботом.', t.d.getElementById('notify-status').textContent);
+  t.close();
   t = await boot({ tg: false });
   await t.click('.themebtn');
   ok('вне Telegram: напоминания недоступны, есть пояснение', t.sheet().includes('Работает только внутри Telegram') && !t.d.getElementById('notify-test'));
