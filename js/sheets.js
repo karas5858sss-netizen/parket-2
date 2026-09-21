@@ -87,7 +87,10 @@ async function sendTestNotify() {
   try {
     const r = await fetch('/api/notify', { method: 'POST', headers: { 'X-Init-Data': tg.initData } });
     const j = await r.json().catch(() => ({}));
-    if (r.ok) box.textContent = 'Отправлено, посмотри чат с ботом.';
+    if (r.ok) {
+      box.textContent = 'Отправлено, посмотри чат с ботом.' +
+        (j.cronReady === false ? ' Но вечерняя отправка по расписанию не настроена: на Vercel нет переменной CRON_SECRET (см. README).' : '');
+    }
     else if (/blocked|initiate|chat not found|deactivated/i.test(j.error || '')) box.textContent = 'Бот не может тебе написать. Открой чат с ботом и нажми Start.';
     else if (r.status === 503) box.textContent = 'На сервере не хватает настроек: ' + ((j.missing || []).join(', ') || 'проверь переменные') + '.';
     else box.textContent = 'Не получилось отправить (' + (j.error || 'HTTP ' + r.status) + ').';
