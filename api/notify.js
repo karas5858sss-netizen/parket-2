@@ -55,7 +55,10 @@ module.exports = async (req, res) => {
   if (!c.botToken) missing.push('BOT_TOKEN');
   if (!c.redisUrl || !c.redisToken) missing.push('Upstash Redis');
   if (req.method === 'GET' && !process.env.CRON_SECRET) missing.push('CRON_SECRET');
-  if (missing.length) return res.status(503).json({ error: 'not_configured', missing });
+  if (missing.length) {
+    console.error('notify: не настроено, напоминание не отправлено. Не хватает:', missing.join(', '));
+    return res.status(503).json({ error: 'not_configured', missing });
+  }
 
   let targets;
   let manual = false;
@@ -120,5 +123,6 @@ module.exports = async (req, res) => {
   console.log('notify', JSON.stringify({ manual, date, base, results }));   // видно в Vercel → Logs
   const failed = results.filter((r) => r.error);
   if (manual && failed.length) return res.status(502).json({ ok: false, error: failed[0].error, results });
-  return res.status(200).json({ ok: true, date, base, results });
+  // cronReady: задан ли CRON_SECRET. Без него вечерний запуск от Vercel Cron получает отказ, хотя «пример» из приложения работает.
+  return res.status(200).json({ ok: true, date, base, results, cronReady: !!process.env.CRON_SECRET });
 };
