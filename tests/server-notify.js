@@ -160,5 +160,16 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   const rc = await run('GET', CRON);
   ok('APP_URL важнее всего (слэш в конце убирается)', rc.body.base === 'https://custom.example.org');
   delete process.env.APP_URL; delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  // ---------- признак «вечерняя отправка настроена» ----------
+  reset();
+  const rr1 = await run('POST', { 'x-init-data': sign({ id: 111 }) });
+  ok('«пример» сообщает, что CRON_SECRET задан (cronReady: true)', rr1.code === 200 && rr1.body.cronReady === true, rr1.body);
+  const savedSecret = process.env.CRON_SECRET; delete process.env.CRON_SECRET;
+  reset();
+  const rr2 = await run('POST', { 'x-init-data': sign({ id: 111 }) });
+  ok('без CRON_SECRET «пример» всё равно уходит, но cronReady: false', rr2.code === 200 && rr2.body.cronReady === false && tgCalls.length === 1, rr2.body);
+  const rr3 = await run('GET', { authorization: 'Bearer anything' });
+  ok('без CRON_SECRET сам cron получает 503 с подсказкой', rr3.code === 503 && rr3.body.missing.includes('CRON_SECRET'), rr3.body);
+  process.env.CRON_SECRET = savedSecret;
   Date.now = REAL_NOW; process.exit(0);
 })();
