@@ -17,8 +17,8 @@ function render() {
   }).join('');
   let body = syncNote();
   if (state.who && state.who !== state.profile) body += `<div class="ro">Расписание ${esc(LABEL[state.profile])}: только просмотр</div>`;
-  if (state.err) {
-    body += `<div class="err">${d ? 'Не удалось обновить, показаны сохранённые данные.' : 'Не удалось загрузить расписание.'} (${esc(state.err)})` +
+  if (state.err[state.profile]) {
+    body += `<div class="err">${d ? 'Не удалось обновить, показаны сохранённые данные.' : 'Не удалось загрузить расписание.'} (${esc(state.err[state.profile])})` +
       '<br><button data-act="refresh">Повторить</button></div>';
   }
   if (d) {
@@ -28,9 +28,9 @@ function render() {
       : '';
     const partial = d.errors && d.errors.length ? ' Часть недель не загрузилась.' : '';
     const pend = hasPending() ? ' Есть несохранённые изменения.' : '';
-    body += `<div class="status"><span>${state.loading ? 'Обновляю…' : 'Обновлено в ' + t + '.' + partial + pend}</span>` +
+    body += `<div class="status"><span>${state.loading[state.profile] ? 'Обновляю…' : 'Обновлено в ' + t + '.' + partial + pend}</span>` +
       '<button data-act="refresh">Обновить</button></div>';
-  } else if (state.loading) {
+  } else if (state.loading[state.profile]) {
     body += '<div class="empty"><div class="ttl">Загружаю расписание…</div></div>';
   }
   const tabs = [['today', 'Сегодня'], ['cal', 'Календарь'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
