@@ -7,42 +7,35 @@
 // Необязательная: APP_URL — адрес приложения для кнопки «Открыть расписание»
 // (по умолчанию берётся из заголовка запроса, то есть боевой домен).
 
-const { cfg, verifyInitData, getDoc, safeEqual, appBase } = require('../lib/shared');
+const { cfg, verifyInitData, getDoc, safeEqual, appBase, fetchSchedule } = require('../lib/shared');
 const { buildDigest, mskNow, addDays } = require('../lib/digest');
 const { refreshChanges } = require('../lib/detect');
 
 const CHANGES_WINDOW_MS = 30 * 3600 * 1000; // в сообщение попадает то, что найдено после прошлого вечернего
+const TELEGRAM_TIMEOUT_MS = 8000;
 
-const FETCH_TIMEOUT_MS = 9000;
-
-async function fetchSchedule(base, profile) {
+async function sendTelegram(token, chatId, text, appUrl) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), TELEGRAM_TIMEOUT_MS);
+  let r;
   try {
-    const r = await fetch(`${base}/api/schedule?profile=${profile}`, { signal: ctrl.signal });
-    if (!r.ok) { console.error('notify: расписание', profile, 'HTTP', r.status, base); return null; }
-    const j = await r.json();
-    return Array.isArray(j.lessons) ? j.lessons : null;
+    r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [[{ text: 'Открыть расписание', web_app: { url: appUrl } }]] },
+      }),
+      signal: ctrl.signal,
+    });
   } catch (e) {
-    console.error('notify: расписание', profile, 'ошибка', String((e && e.message) || e), base);
-    return null;
+    throw new Error(e && e.name === 'AbortError' ? 'telegram timeout' : 'telegram network: ' + ((e && e.message) || e));
   } finally {
     clearTimeout(timer);
   }
-}
-
-async function sendTelegram(token, chatId, text, appUrl) {
-  const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[{ text: 'Открыть расписание', web_app: { url: appUrl } }]] },
-    }),
-  });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.ok) throw new Error(j.description || 'telegram HTTP ' + r.status);
 }
@@ -83,22 +76,25 @@ module.exports = async (req, res) => {
   const now = mskNow();
   const date = addDays(now.slice(0, 10), 1);
 
-  let schedules;
+  // Расписание запрашиваем один раз на профиль и переиспользуем: и для текста напоминания,
+  // и для сравнения версий (передаём его в refreshChanges вместо того, чтобы она грузила его сама).
+  let scheduleFull;
   let docs;
   try {
     const [sMe, sHer, dMe, dHer] = await Promise.all([
       fetchSchedule(base, 'me'), fetchSchedule(base, 'her'), getDoc('me'), getDoc('her'),
     ]);
-    schedules = { me: sMe, her: sHer };
+    scheduleFull = { me: sMe, her: sHer };
     docs = { me: dMe, her: dHer };
   } catch (e) {
     return res.status(502).json({ error: 'storage_failed', message: String((e && e.message) || e) });
   }
+  const schedules = { me: scheduleFull.me && scheduleFull.me.lessons, her: scheduleFull.her && scheduleFull.her.lessons };
 
-  // журнал изменений: сначала сверяем расписание, потом берём непрочитанные свежие записи
+  // журнал изменений: расписание уже загружено выше, сверяем на его основе, потом берём непрочитанное
   let logs = { me: [], her: [] };
   try {
-    logs = (await refreshChanges({ base, today: now.slice(0, 10), nowIso: new Date(Date.now()).toISOString() })).items;
+    logs = (await refreshChanges({ base, today: now.slice(0, 10), nowIso: new Date(Date.now()).toISOString(), schedules: scheduleFull })).items;
   } catch (e) { /* без изменений письмо всё равно уйдёт */ }
   const since = new Date(Date.now() - CHANGES_WINDOW_MS).toISOString();
   const changesFor = (who) => {
