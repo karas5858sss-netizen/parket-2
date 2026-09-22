@@ -17,8 +17,8 @@ const state = {
   userPicked: false,
   tab: ['week', 'month', 'subjects', 'search', 'stats'].includes(store.get('parket.tab')) ? store.get('parket.tab') : 'today',
   data: {},        // profile -> { lessons, group, fetchedAt, errors }
-  err: null,
-  loading: false,
+  err: {},         // profile -> текст последней ошибки загрузки расписания (или ничего)
+  loading: {},     // profile -> идёт ли сейчас загрузка расписания
   sync: { code: 'idle' },
   changes: readJSON('parket.changes', { me: [], her: [] }),   // журнал изменений расписания
   weekOf: null,    // понедельник показанной недели
@@ -32,31 +32,48 @@ const readCache = (p) => { try { return JSON.parse(store.get('parket.cache.' + p
 const writeCache = (p, d) => store.set('parket.cache.' + p, JSON.stringify(d));
 
 // ---------- расписание ----------
+// Запросы расписания для одного профиля могут перекрываться (переключение профиля, «Обновить»,
+// возврат из фона), и ответы могут прийти не в том порядке, в каком ушли запросы. Два счётчика на
+// профиль следят, чтобы применялся только САМЫЙ ПОСЛЕДНИЙ запущенный запрос, а более ранние,
+// пришедшие позже, тихо отбрасывались — и success, и ошибка:
+//   dataSeq — кто последним имеет право записать state.data[profile] (load() и loadQuiet() вместе);
+//   loadSeq — кто последним имеет право выставить err[profile]/loading[profile] (только load()).
+const dataSeq = { me: 0, her: 0 };
+const loadSeq = { me: 0, her: 0 };
+
 async function load(profile) {
   if (!state.data[profile]) { const c = readCache(profile); if (c) state.data[profile] = c; }
-  state.loading = true; state.err = null;
-  render();
+  const myData = ++dataSeq[profile];
+  const myLoad = ++loadSeq[profile];
+  state.loading[profile] = true; state.err[profile] = null;
+  if (state.profile === profile) render();
   try {
     const r = await fetch('/api/schedule?profile=' + profile);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
+    if (dataSeq[profile] !== myData) return; // запущен более новый запрос — этот ответ устарел
     state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
     writeCache(profile, state.data[profile]);
   } catch (e) {
-    state.err = e.message || 'сеть недоступна';
+    if (loadSeq[profile] === myLoad) state.err[profile] = e.message || 'сеть недоступна';
   } finally {
-    state.loading = false;
-    if (state.profile === profile) render();
+    if (loadSeq[profile] === myLoad) {
+      state.loading[profile] = false;
+      if (state.profile === profile) render();
+    }
   }
 }
 
 let lastChangesAt = 0;
+let changesSeq = 0; // журнал читается целиком на двоих, поэтому счётчик один, не по профилям
 async function loadChanges() {
   if (!tg || !tg.initData || !state.who) return;
+  const my = ++changesSeq;
   try {
     const r = await fetch('/api/changes', { headers: { 'X-Init-Data': tg.initData }, cache: 'no-store' });
     if (!r.ok) return;
     const j = await r.json();
+    if (changesSeq !== my) return; // более новый запрос журнала уже в пути или пришёл раньше
     state.changes = { me: (j.items && j.items.me) || [], her: (j.items && j.items.her) || [] };
     store.set('parket.changes', JSON.stringify(state.changes));
     lastChangesAt = Date.now();
@@ -65,10 +82,12 @@ async function loadChanges() {
 
 async function loadQuiet(profile) {
   if (!state.data[profile]) { const c = readCache(profile); if (c) { state.data[profile] = c; render(); } }
+  const myData = ++dataSeq[profile]; // тот же счётчик, что у load(): пишет то же поле state.data[profile]
   try {
     const r = await fetch('/api/schedule?profile=' + profile);
     if (!r.ok) return;
     const j = await r.json();
+    if (dataSeq[profile] !== myData) return;
     state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
     writeCache(profile, state.data[profile]);
     render();
@@ -103,11 +122,14 @@ function applyLocal(doc, patch) {
   }
 }
 
+let stateSeq = 0;
 async function loadState() {
   if (!tg || !tg.initData) { state.sync = { code: 'browser' }; return; }
+  const my = ++stateSeq;
   try {
     const r = await fetch('/api/state', { headers: { 'X-Init-Data': tg.initData }, cache: 'no-store' });
     const j = await r.json().catch(() => ({}));
+    if (stateSeq !== my) return; // более новый запрос уже применил свой результат
     if (r.status === 403) { state.sync = { code: 'denied', id: j.yourId }; return; }
     if (r.status === 503) { state.sync = { code: 'off' }; return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -118,7 +140,7 @@ async function loadState() {
     lastStateAt = Date.now();
     persistState();
   } catch (e) {
-    state.sync = { code: 'error', msg: e.message };
+    if (stateSeq === my) state.sync = { code: 'error', msg: e.message };
   }
 }
 
