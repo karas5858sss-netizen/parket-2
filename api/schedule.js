@@ -18,11 +18,17 @@ const PROFILES = {
   her: { label: 'Она', source: 'donstu', groupId: 73381, groupName: 'ДСО12', subgroup: null },
 };
 
-const TIMEOUT_MS = 8000;
-const CONCURRENCY = 5;
+// Все числа в одном месте (тесты подменяют их на маленькие).
+const CONFIG = {
+  TIMEOUT_MS: 5000,          // одна попытка запроса к вузу
+  DEADLINE_MS: 25000,        // общий бюджет времени на весь ответ; недели, не успевшие в него, идут в errors
+  CONCURRENCY: 5,            // недель одновременно
+  FALLBACK_WEEKS_BACK: 1,    // запасной диапазон, если список дат «сломан» (не «не отвечает»):
+  FALLBACK_WEEKS_AHEAD: 8,   //   неделя назад и 8 вперёд = 10 недель
+  MAX_INVALID_SHARE: 0.2,    // если битых записей больше этой доли (и не меньше MIN_INVALID_TO_FAIL), ответ вуза испорчен
+  MIN_INVALID_TO_FAIL: 3,
+};
 const DAY = 86400000;
-const FALLBACK_WEEKS_BACK = 1;
-const FALLBACK_WEEKS_AHEAD = 18;
 
 // ---- даты (всё в UTC, чтобы пояс сервера ничего не сдвигал) ----
 const pad = (n) => String(n).padStart(2, '0');
@@ -35,19 +41,43 @@ const parseIso = (s) => {
   return Date.UTC(y, m - 1, d);
 };
 const mondayOf = (t) => t - ((new Date(t).getUTCDay() + 6) % 7) * DAY;
+const RE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const RE_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const isRealDate = (s) => typeof s === 'string' && RE_DATE.test(s) && toIso(parseIso(s)) === s;
 
 // ---- сеть ----
-async function getJson(url) {
+// Что повторяем: сеть, таймаут, 408, 429 и 5xx. Остальные 4xx и «ответ не JSON» повтора не заслуживают.
+function upstreamError(message, transient, status) {
+  const e = new Error(message);
+  e.transient = transient;
+  if (status) e.status = status;
+  return e;
+}
+const isTransientStatus = (s) => s === 408 || s === 429 || s >= 500;
+
+async function getJson(url, deadline) {
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
+    const left = deadline - Date.now();
+    if (left <= 0) throw lastErr || upstreamError('deadline exceeded', true);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+    const timer = setTimeout(() => ctrl.abort(), Math.min(CONFIG.TIMEOUT_MS, left));
     try {
-      const r = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return await r.json();
+      let r;
+      try {
+        r = await fetch(url, { signal: ctrl.signal, headers: { accept: 'application/json' } });
+      } catch (e) {
+        throw upstreamError(e && e.name === 'AbortError' ? 'timeout' : 'network: ' + ((e && e.message) || e), true);
+      }
+      if (!r.ok) throw upstreamError('HTTP ' + r.status, isTransientStatus(r.status), r.status);
+      try {
+        return await r.json();
+      } catch (e) {
+        throw e && e.name === 'AbortError' ? upstreamError('timeout', true) : upstreamError('bad response (not JSON)', false);
+      }
     } catch (e) {
       lastErr = e;
+      if (!e.transient) break;
     } finally {
       clearTimeout(timer);
     }
@@ -68,18 +98,23 @@ async function pool(items, fn, limit) {
   return out;
 }
 
-// ---- нормализация одной пары ----
+// ---- нормализация и проверка одной пары ----
+// Контракт: date 'ГГГГ-ММ-ДД', start/end 'ЧЧ:ММ', startAt/endAt 'ГГГГ-ММ-ДДTЧЧ:ММ:СС' (местное время вуза, без пояса).
+// startAt/endAt собираем сами из даты и времени, а не берём на веру из полей вуза.
 const KIND = /^(лек|пр|лаб|сем)\.?\s+/i;
 function normalize(x) {
-  const title = (x['дисциплина'] || '').trim();
+  const title = String(x['дисциплина'] || '').trim();
   const m = title.match(KIND);
+  const date = String(x['дата']).slice(0, 10);
+  const start = x['начало'];
+  const end = x['конец'];
   return {
     id: x['код'],
-    date: String(x['дата']).slice(0, 10),
-    start: x['начало'],
-    end: x['конец'],
-    startAt: x['датаНачала'], // локальное время вуза, без пояса
-    endAt: x['датаОкончания'],
+    date,
+    start,
+    end,
+    startAt: `${date}T${start}:00`,
+    endAt: `${date}T${end}:00`,
     num: x['номерЗанятия'],
     kind: m ? m[1].toLowerCase() : null,
     subject: m ? title.slice(m[0].length) : title,
@@ -91,6 +126,13 @@ function normalize(x) {
     weekType: x['типНедели'],
     replaced: !!x['замена'],
   };
+}
+
+function validLesson(l) {
+  if (!(typeof l.id === 'number' || (typeof l.id === 'string' && l.id !== ''))) return false;
+  if (!isRealDate(l.date)) return false;
+  if (!RE_TIME.test(l.start) || !RE_TIME.test(l.end) || l.end <= l.start) return false;
+  return typeof l.subject === 'string' && l.subject.trim() !== '';
 }
 
 // Вуз выкладывает п/г как отдельные пары с суффиксом ", п/г N" в названии.
@@ -134,23 +176,39 @@ function collapseSubgroups(lessons, wanted) {
 }
 
 // ---- handler ----
+function fail(res, key, p, status, body) {
+  console.error('schedule:', key, p.source, status, JSON.stringify(body).slice(0, 300));
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(status).json(body);
+}
+
 module.exports = async (req, res) => {
+  if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Allow', 'GET, HEAD');
+    return res.status(405).json({ error: 'method_not_allowed' });
+  }
   const key = String((req.query && req.query.profile) || '');
   const p = PROFILES[key];
   if (!p) {
     return res.status(400).json({ error: 'unknown profile', allowed: Object.keys(PROFILES) });
   }
   const api = (path) => `${SOURCES[p.source]}/api/${path}`;
+  const deadline = Date.now() + CONFIG.DEADLINE_MS;
 
   // 1) какие дни вообще есть в расписании этой группы
   let dates = [];
   let range = null;
+  let datesErr = null;
   try {
-    const d = (await getJson(api(`GetRaspDates?idGroup=${p.groupId}`))).data || {};
-    dates = Array.isArray(d.dates) ? d.dates : [];
+    const d = (await getJson(api(`GetRaspDates?idGroup=${p.groupId}`), deadline)).data || {};
+    dates = Array.isArray(d.dates) ? d.dates.filter(isRealDate) : [];
     range = { min: d.minDate || null, max: d.maxDate || null };
-  } catch (_) {
-    /* упадём на запасной вариант ниже */
+  } catch (e) {
+    datesErr = e;
+  }
+  // Сервер вуза не отвечает: недели тоже не ответят, ждать их бессмысленно.
+  if (datesErr && datesErr.transient) {
+    return fail(res, key, p, 502, { error: 'upstream unavailable', source: p.source, reason: datesErr.message });
   }
 
   // 2) одна неделя = один запрос: берём по одной дате на каждую неделю
@@ -159,42 +217,48 @@ module.exports = async (req, res) => {
     const mon = mondayOf(parseIso(s));
     if (!weeks.has(mon)) weeks.set(mon, s);
   }
+  // Запасной вариант только если список дат «сломан» (4xx, не JSON) или пуст, а не когда вуз лежит.
   if (weeks.size === 0) {
     const now = mondayOf(Date.now());
-    for (let w = -FALLBACK_WEEKS_BACK; w <= FALLBACK_WEEKS_AHEAD; w++) {
+    for (let w = -CONFIG.FALLBACK_WEEKS_BACK; w <= CONFIG.FALLBACK_WEEKS_AHEAD; w++) {
       const mon = now + w * 7 * DAY;
       weeks.set(mon, toIso(mon));
     }
   }
   const sdates = [...weeks.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
 
-  // 3) тянем недели параллельно (по 5 штук) и склеиваем без дублей
+  // 3) тянем недели параллельно и склеиваем без дублей
   const results = await pool(
     sdates,
     async (sdate) => {
-      const j = await getJson(api(`Rasp?idGroup=${p.groupId}&sdate=${sdate}`));
+      const j = await getJson(api(`Rasp?idGroup=${p.groupId}&sdate=${sdate}`), deadline);
       return (j.data && j.data.rasp) || [];
     },
-    CONCURRENCY
+    CONFIG.CONCURRENCY
   );
 
   const byId = new Map();
   const errors = [];
+  let valid = 0;
+  let invalid = 0;
   results.forEach((r, i) => {
-    if (r.e) errors.push({ sdate: sdates[i], error: r.e });
-    else for (const x of r.v) byId.set(x['код'], normalize(x));
+    if (r.e) { errors.push({ sdate: sdates[i], error: r.e }); return; }
+    for (const x of r.v) {
+      const l = normalize(x);
+      if (validLesson(l)) { valid += 1; byId.set(l.id, l); } else invalid += 1;
+    }
   });
-  const sorted = [...byId.values()].sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
-  const lessons = collapseSubgroups(sorted, p.subgroup);
 
   if (errors.length === sdates.length) {
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(502).json({ error: 'upstream failed', source: p.source, errors });
+    return fail(res, key, p, 502, { error: 'upstream failed', source: p.source, errors });
   }
-  res.setHeader(
-    'Cache-Control',
-    errors.length ? 'no-store' : 's-maxage=900, stale-while-revalidate=3600'
-  );
+  if (invalid >= CONFIG.MIN_INVALID_TO_FAIL && invalid / (valid + invalid) > CONFIG.MAX_INVALID_SHARE) {
+    return fail(res, key, p, 502, { error: 'upstream malformed', source: p.source, invalid, valid });
+  }
+
+  const sorted = [...byId.values()].sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  const lessons = collapseSubgroups(sorted, p.subgroup);
+  res.setHeader('Cache-Control', errors.length ? 'no-store' : 's-maxage=900, stale-while-revalidate=3600');
   return res.status(200).json({
     profile: key,
     label: p.label,
@@ -204,7 +268,10 @@ module.exports = async (req, res) => {
     range,
     weeks: sdates.length,
     errors,
+    invalid,
     fetchedAt: new Date().toISOString(),
     lessons,
   });
 };
+
+module.exports.__internals = { CONFIG, normalize, validLesson, collapseSubgroups, getJson };
