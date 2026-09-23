@@ -77,7 +77,7 @@ async function loadChanges() {
     state.changes = { me: (j.items && j.items.me) || [], her: (j.items && j.items.her) || [] };
     store.set('parket.changes', JSON.stringify(state.changes));
     lastChangesAt = Date.now();
-  } catch (e) { /* журнал необязателен */ }
+  } catch (e) { console.warn('loadChanges:', e && e.message); /* журнал необязателен, UI не показывает */ }
 }
 
 async function loadQuiet(profile) {
@@ -91,7 +91,7 @@ async function loadQuiet(profile) {
     state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
     writeCache(profile, state.data[profile]);
     render();
-  } catch (e) { /* второй профиль необязателен */ }
+  } catch (e) { console.warn('loadQuiet:', profile, e && e.message); /* второй профиль необязателен, UI не показывает */ }
 }
 
 // ---------- общее хранилище: ДЗ и отметки ----------
@@ -163,7 +163,7 @@ async function flush() {
     for (const k of Object.keys(sent.custom || {})) if (JSON.stringify(pending.custom[k]) === JSON.stringify(sent.custom[k])) delete pending.custom[k];
     for (const k of Object.keys(sent.prefs || {})) if (JSON.stringify(pending.prefs[k]) === JSON.stringify(sent.prefs[k])) delete pending.prefs[k];
     persistPending();
-  } catch (e) { /* останется в очереди, отправим при следующем случае */ }
+  } catch (e) { console.warn('flush:', e && e.message); /* останется в очереди, отправим при следующем случае */ }
   finally { flushing = false; render(); }
 }
 
