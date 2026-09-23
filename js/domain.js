@@ -48,8 +48,11 @@ function changeFor(l) {
   return unseenChanges(state.profile).find((x) => x.lid === String(l.id) && (x.type === 'moved' || x.type === 'changed' || x.type === 'added')) || null;
 }
 
-function pairNo(l, profile) {
-  const i = (SLOTS[profile || state.profile] || []).findIndex((sl) => sl[0] === l.start);
+// Сигнатура (profile, lesson) — как в lib/slots.js на сервере, для одинакового порядка
+// аргументов в двух средах (см. README «Единая сигнатура»). profile передаётся явно,
+// без подстановки state.profile по умолчанию — чтобы вызов случайно не взял не тот профиль.
+function pairNo(profile, l) {
+  const i = (SLOTS[profile] || []).findIndex((sl) => sl[0] === l.start);
   if (i >= 0) return i + 1;
   return !l.custom && l.num > 0 ? l.num : 0;   // не по сетке: номер из расписания вуза, у своих пар без номера
 }
