@@ -25,7 +25,7 @@ function openSheet(o) {
       `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : 'Удалить пару'}</button>`
     : '';
   const head = l
-    ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(l) ? ', ' + pairNo(l) + ' пара' : ''}</div>${own}`
+    ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(state.profile, l) ? ', ' + pairNo(state.profile, l) + ' пара' : ''}</div>${own}`
     : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
   let body;
   if (edit) {
