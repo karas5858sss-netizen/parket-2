@@ -1,7 +1,0 @@
-{
-  "name": "parket-tests",
-  "private": true,
-  "description": "Тесты ПАР·КЕТ: клиент (jsdom) и сервер (с имитацией Redis, Telegram и расписания вуза)",
-  "scripts": { "test": "node run-all.js" },
-  "devDependencies": { "jsdom": "^24.0.0" }
-}
