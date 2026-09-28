@@ -36,7 +36,12 @@ function lessonHTML(l) {
     meta += `<details><summary>Подгруппы ${v[0].n}–${v[v.length - 1].n}</summary><div class="vars">` +
       v.map((x) => `<div>п/г ${x.n}: ${esc(x.teacher)}, ${esc(x.room)}</div>`).join('') + '</div></details>';
   }
-  if (hw && !hw.done) meta += `<div class="hw"><i class="rd"></i><span>${esc(hw.text)}</span></div>`;
+  const allHw = hwItems(hw);
+  const activeHw = allHw.filter((x) => !x.done && x.text);
+  if (activeHw.length) {
+    const more = activeHw.length > 1 ? ` <span class="badge k-hw">+${activeHw.length - 1}</span>` : '';
+    meta += `<div class="hw"><i class="rd"></i><span>${esc(activeHw[0].text)}</span>${more}</div>`;
+  }
   const done = !!doc.done[lkey(l)];
   if (done) meta += '<div class="meta okline">✓ пройдена</div>';
   const col = colorOf(skey(l));
@@ -49,10 +54,20 @@ function lessonHTML(l) {
 }
 
 function hwListHTML() {
-  const items = Object.entries(curDoc().hw).filter(([, v]) => !v.done).sort((a, b) => (b[1].t || 0) - (a[1].t || 0));
+  const doc = curDoc();
+  const items = [];
+  for (const [k, v] of Object.entries(doc.hw)) {
+    const all = hwItems(v);
+    all.forEach((it, idx) => {
+      if (!it.done && it.text) {
+        items.push({ sk: k, name: v.name || k, text: it.text, tabIdx: idx, t: it.t || v.t || 0 });
+      }
+    });
+  }
+  items.sort((a, b) => b.t - a.t);
   if (!items.length) return '';
-  return '<h2>Активное ДЗ</h2>' + items.map(([k, v]) =>
-    `<button class="hwitem${colorOf(k) ? ' colored' : ''}"${colorOf(k) ? ` style="--c:${colorOf(k)}"` : ''} data-act="hw" data-sk="${esc(k)}"><b>${esc(v.name || k)}</b><span>${esc(v.text)}</span></button>`).join('');
+  return '<h2>Активное ДЗ</h2>' + items.map((x) =>
+    `<button class="hwitem${colorOf(x.sk) ? ' colored' : ''}"${colorOf(x.sk) ? ` style="--c:${colorOf(x.sk)}"` : ''} data-act="hw" data-sk="${esc(x.sk)}" data-tab="${x.tabIdx}"><b>${esc(x.name)}</b><span>${esc(x.text)}</span></button>`).join('');
 }
 
 function jointBlock(date) {

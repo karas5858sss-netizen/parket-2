@@ -54,7 +54,8 @@ document.addEventListener('click', (e) => {
   }
   if (act === 'hw') {
     const h = curDoc().hw[b.dataset.sk];
-    openSheet({ sk: b.dataset.sk, name: h ? h.name : '', lesson: null });
+    const tabIdx = b.dataset.tab ? Number(b.dataset.tab) : 0;
+    openSheet({ sk: b.dataset.sk, name: h ? h.name : '', lesson: null, tabIdx });
     return;
   }
   if (act === 'add') { if (canEdit()) openForm(null, null); return; }
@@ -134,16 +135,50 @@ document.addEventListener('click', (e) => {
     });
     return;
   }
+  if (act === 'hw-tab' && sheetCtx) {
+    const ta = document.getElementById('hwtext');
+    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value;
+    sheetCtx.curTab = Number(b.dataset.i);
+    renderSheetContent();
+    return;
+  }
+  if (act === 'hw-add' && sheetCtx) {
+    const ta = document.getElementById('hwtext');
+    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value;
+    sheetCtx.items.push({ id: newId(), text: '', done: false, t: Date.now() });
+    sheetCtx.curTab = sheetCtx.items.length - 1;
+    renderSheetContent();
+    const nta = document.getElementById('hwtext');
+    if (nta) nta.focus();
+    return;
+  }
   if (act === 'hw-save' && sheetCtx) {
-    const text = document.getElementById('hwtext').value.trim().slice(0, 100);
-    saveHw(sheetCtx.sk, sheetCtx.name, text, false); closeSheet(); return;
+    const ta = document.getElementById('hwtext');
+    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value.trim().slice(0, 300);
+    saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
+    closeSheet();
+    return;
   }
   if (act === 'hw-toggle' && sheetCtx) {
-    const h = curDoc().hw[sheetCtx.sk];
-    if (h) saveHw(sheetCtx.sk, h.name || sheetCtx.name, h.text, !h.done);
-    closeSheet(); return;
+    const ta = document.getElementById('hwtext');
+    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value.trim().slice(0, 300);
+    const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
+    if (cur) cur.done = !cur.done;
+    saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
+    closeSheet();
+    return;
   }
-  if (act === 'hw-del' && sheetCtx) { save({ hw: { [sheetCtx.sk]: null } }); closeSheet(); return; }
+  if (act === 'hw-del' && sheetCtx) {
+    if (sheetCtx.items && sheetCtx.items.length > 1) {
+      sheetCtx.items.splice(sheetCtx.curTab, 1);
+      sheetCtx.curTab = Math.max(0, sheetCtx.curTab - 1);
+      saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
+    } else {
+      save({ hw: { [sheetCtx.sk]: null } });
+    }
+    closeSheet();
+    return;
+  }
   if (act === 'lesson-done' && sheetCtx && sheetCtx.lesson) {
     const l = sheetCtx.lesson;
     const k = lkey(l);
@@ -158,28 +193,53 @@ document.addEventListener('click', (e) => {
   if (act === 'undo') { const f = undoFn; hideToast(); if (f) f(); return; }
   if (act === 'profile' && b.dataset.p !== state.profile) {
     state.userPicked = true;
-    state.profile = b.dataset.p; state.weekOf = null; state.selDate = null;
+    state.profile = b.dataset.p;
     store.set('parket.profile', state.profile);
     load(state.profile);
   } else if (act === 'tab') {
     let tb = b.dataset.tab;
     if (tb === 'cal') tb = state.calMode;                       // «Календарь» открывается в последнем масштабе
-    if (tb === 'week' || tb === 'month' || tb === 'subjects') { state.calMode = tb; store.set('parket.calmode', tb); }
+    if (tb === 'week' || tb === 'month' || tb === 'subjects') {
+      state.calMode = tb;
+      store.set('parket.calmode', tb);
+      if (tb === 'month' && state.selDate) {
+        state.month = state.selDate.slice(0, 7);
+        state.calSel = state.selDate;
+      } else if (tb === 'week' && state.calSel) {
+        state.selDate = state.calSel;
+        state.weekOf = mondayOf(state.calSel);
+      }
+    }
     state.tab = tb; store.set('parket.tab', tb); render();
   } else if (act === 'prev' || act === 'next') {
-    state.weekOf = addDays(state.weekOf, act === 'next' ? 7 : -7); state.selDate = null; render();
+    state.weekOf = addDays(state.weekOf, act === 'next' ? 7 : -7);
+    if (state.selDate) state.selDate = addDays(state.selDate, act === 'next' ? 7 : -7);
+    render();
   } else if (act === 'day') {
-    state.selDate = b.dataset.date; render();
+    state.selDate = b.dataset.date;
+    state.calSel = b.dataset.date;
+    state.month = b.dataset.date.slice(0, 7);
+    render();
   } else if (act === 'today') {
-    state.weekOf = null; state.selDate = null; render();
+    const td = nowStr().slice(0, 10);
+    state.weekOf = mondayOf(td); state.selDate = td;
+    state.calSel = td; state.month = td.slice(0, 7);
+    render();
   } else if (act === 'mprev' || act === 'mnext') {
     const [yy, mm] = state.month.split('-').map(Number);
     const nd = new Date(Date.UTC(yy, mm - 1 + (act === 'mnext' ? 1 : -1), 1));
-    state.month = nd.getUTCFullYear() + '-' + pad(nd.getUTCMonth() + 1); state.calSel = null; render();
+    state.month = nd.getUTCFullYear() + '-' + pad(nd.getUTCMonth() + 1);
+    render();
   } else if (act === 'mtoday') {
-    state.month = null; state.calSel = null; render();
+    const td = nowStr().slice(0, 10);
+    state.month = td.slice(0, 7); state.calSel = td;
+    state.selDate = td; state.weekOf = mondayOf(td);
+    render();
   } else if (act === 'cell') {
-    state.calSel = b.dataset.date; render();
+    state.calSel = b.dataset.date;
+    state.selDate = b.dataset.date;
+    state.weekOf = mondayOf(b.dataset.date);
+    render();
   } else if (act === 'kind') {
     state.kind = b.dataset.v; state.limit = 50; render();
   } else if (act === 'tgl') {
@@ -219,10 +279,35 @@ const TIMERS = {
   CHANGES_STALE_MS: 5 * 60 * 1000,   // то же самое для журнала «что изменилось»
 };
 
+function updateLiveToday() {
+  if (state.tab !== 'today' || !state.data[state.profile]) return;
+  const now = nowStr();
+  const today = now.slice(0, 10);
+  const all = allLessons();
+  const day = all.filter((l) => l.date === today);
+  const cur = day.find((l) => l.startAt <= now && now < l.endAt && !isDone(l));
+  const upcoming = day.filter((l) => l.startAt > now && !isDone(l));
+  const upBox = document.querySelector('.up');
+  if (!upBox) {
+    if (cur || upcoming.length) render();
+    return;
+  }
+  if (cur) {
+    const a = ms(cur.startAt), b = ms(cur.endAt), n = ms(now);
+    const pct = Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));
+    const cap = upBox.querySelector('.cap');
+    const bar = upBox.querySelector('.bar i');
+    if (cap) cap.textContent = `Идёт сейчас, осталось ${dur(Math.ceil((b - n) / 60000))}`;
+    if (bar) bar.style.width = `${pct.toFixed(1)}%`;
+  } else {
+    render();
+  }
+}
+
 setInterval(() => {
   if (document.hidden) return;
   if (hasPending()) flush();
-  if (state.tab === 'today' && state.data[state.profile]) render();
+  updateLiveToday();
 }, TIMERS.CLOCK_MS);
 
 document.addEventListener('visibilitychange', () => {
@@ -239,7 +324,7 @@ load(state.profile);
 loadQuiet(otherOf(state.profile));
 loadState().then(() => {
   if (state.who && !state.userPicked && state.profile !== state.who) {
-    state.profile = state.who; state.weekOf = null; state.selDate = null;
+    state.profile = state.who;
     load(state.profile);
     loadQuiet(otherOf(state.profile));
   } else {

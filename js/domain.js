@@ -10,6 +10,19 @@ const lkey = (l) => l.date + '|' + l.start + '|' + skey(l);
 const curDoc = () => state.docs[state.profile] || emptyDoc();
 const canEdit = () => !!state.who && state.who === state.profile;
 const isDone = (l) => !!curDoc().done[lkey(l)];
+const hwItems = (h) => {
+  if (!h) return [];
+  if (Array.isArray(h.items) && h.items.length) {
+    return h.items.filter((it) => it && (it.text || it.done)).map((it, i) => ({
+      id: String(it.id || i + 1),
+      text: String(it.text || ''),
+      done: !!it.done,
+      t: it.t || 0,
+    }));
+  }
+  if (h.text) return [{ id: '1', text: String(h.text), done: !!h.done, t: h.t || 0 }];
+  return [];
+};
 
 // ---------- свои пары: превращаем записи в обычные карточки ----------
 function expandCustom(id, c) {

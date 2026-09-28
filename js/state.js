@@ -117,8 +117,21 @@ let lastStateAt = 0;
 function applyLocal(doc, patch) {
   const now = Date.now();
   for (const [k, v] of Object.entries(patch.hw || {})) {
-    if (!v || !v.text) delete doc.hw[k];
-    else doc.hw[k] = { name: v.name || '', text: v.text, done: !!v.done, t: now };
+    if (!v) { delete doc.hw[k]; continue; }
+    let items = [];
+    if (Array.isArray(v.items)) {
+      items = v.items.filter((it) => it && (it.text || it.done)).map((it, i) => ({
+        id: String(it.id || i + 1),
+        text: String(it.text || '').trim().slice(0, 300),
+        done: !!it.done,
+        t: it.t || now,
+      }));
+    }
+    const text = String(v.text || (items[0] && items[0].text) || '').trim().slice(0, 300);
+    if (!text && !items.length) { delete doc.hw[k]; continue; }
+    if (!items.length && text) items = [{ id: '1', text, done: !!v.done, t: now }];
+    const done = items.length ? items.every((x) => x.done) : !!v.done;
+    doc.hw[k] = { name: v.name || '', text, done, items, t: now };
   }
   for (const [k, v] of Object.entries(patch.done || {})) {
     if (v) doc.done[k] = now; else delete doc.done[k];
@@ -204,4 +217,32 @@ function savePref(patch) {
   flush();
 }
 const notifyOn = () => !!state.who && state.docs[state.who].prefs.notify !== false;
-const saveHw = (sk, name, text, done) => save({ hw: { [sk]: text ? { name, text, done } : null } });
+const saveHw = (sk, name, itemsOrText, done) => {
+  let items = [];
+  if (Array.isArray(itemsOrText)) {
+    items = itemsOrText.filter((x) => x && (x.text || x.done)).map((x, i) => ({
+      id: String(x.id || i + 1),
+      text: String(x.text || '').trim().slice(0, 300),
+      done: !!x.done,
+      t: x.t || Date.now(),
+    }));
+  } else if (typeof itemsOrText === 'string') {
+    const text = itemsOrText.trim().slice(0, 300);
+    if (text) items = [{ id: '1', text, done: !!done, t: Date.now() }];
+  }
+  if (!items.length) {
+    save({ hw: { [sk]: null } });
+  } else {
+    const firstActive = items.find((x) => !x.done) || items[0];
+    save({
+      hw: {
+        [sk]: {
+          name: name || '',
+          text: firstActive.text,
+          done: items.every((x) => x.done),
+          items,
+        },
+      },
+    });
+  }
+};

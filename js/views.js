@@ -66,9 +66,11 @@ function hwDueDays(all) {
   const now = nowStr();
   const due = new Set();
   for (const [sk, v] of Object.entries(curDoc().hw)) {
-    if (v.done) continue;
-    const nx = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
-    if (nx) due.add(nx.date);
+    const act = hwItems(v).filter((x) => !x.done && x.text);
+    if (act.length) {
+      const nx = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
+      if (nx) due.add(nx.date);
+    }
   }
   return due;
 }
@@ -120,8 +122,11 @@ function resultsHTML(all) {
   const toks = norm(state.q).split(/\s+/).filter(Boolean);
   const list = all.filter((l) => {
     if (!state.past && l.date < today) return false;
-    if (state.kind !== 'all' && l.kind !== state.kind) return false;
-    if (state.onlyHw) { const h = doc.hw[skey(l)]; if (!h || h.done) return false; }
+    if (state.onlyHw) {
+      const h = doc.hw[skey(l)];
+      const act = hwItems(h).filter((x) => !x.done && x.text);
+      if (!act.length) return false;
+    }
     const hay = haystack(l);
     return toks.every((t) => hay.includes(t));
   });
@@ -179,11 +184,15 @@ function viewSubjects(all) {
       const own = l.custom ? '<span class="badge k-own">своя</span>' : '';
       const col = colorOf(x.k);
       const hw = doc.hw[x.k];
+      const act = hwItems(hw).filter((it) => !it.done && it.text);
+      const hwBlock = act.length
+        ? `<div class="hw"><i class="rd"></i><span>${esc(act[0].text)}</span>${act.length > 1 ? ` <span class="badge k-hw">+${act.length - 1}</span>` : ''}</div>`
+        : '';
       const pn = pairNo(state.profile, l);
       return `<article class="subjrow${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
         `<div class="rl"><div class="sname">${kind}${chgB}${own}${esc(x.name)}</div><div class="when"><b>${top}</b>${sub ? `<span>${sub}</span>` : ''}</div></div>` +
         `<div class="meta">${pn ? pn + ' пара, ' : ''}${esc(l.start)}–${esc(l.end)}${esc(roomBit(l))}</div>` +
-        (hw && !hw.done ? `<div class="hw"><i class="rd"></i><span>${esc(hw.text)}</span></div>` : '') +
+        hwBlock +
         `<div class="meta">Осталось занятий: ${x.left}</div></article>`;
     }).join('');
   }
@@ -236,17 +245,25 @@ function viewStats(all) {
   }).join('');
 
   // ДЗ
-  const hwAll = Object.entries(doc.hw);
-  const active = hwAll.filter(([, v]) => !v.done).map(([k, v]) => {
-    const nx = all.find((l) => l.startAt > now && skey(l) === k && !isDone(l));
-    return { k, name: v.name || k, text: v.text, due: nx ? nx.date : null };
+  const hwAll = [];
+  for (const [k, v] of Object.entries(doc.hw)) {
+    const allHw = hwItems(v);
+    if (allHw.length) {
+      allHw.forEach((it, idx) => hwAll.push({ k, name: v.name || k, text: it.text, done: it.done, tabIdx: idx, t: it.t || 0 }));
+    } else if (v && v.text) {
+      hwAll.push({ k, name: v.name || k, text: v.text, done: !!v.done, tabIdx: 0, t: v.t || 0 });
+    }
+  }
+  const active = hwAll.filter((a) => !a.done).map((a) => {
+    const nx = all.find((l) => l.startAt > now && skey(l) === a.k && !isDone(l));
+    return { k: a.k, name: a.name, text: a.text, due: nx ? nx.date : null, tabIdx: a.tabIdx };
   }).sort((a, b) => (a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : 0);
   html += '<h2>ДЗ</h2><div class="tiles">' +
     `<div class="tile"><b>${active.length}</b><span>активных</span></div>` +
     `<div class="tile"><b>${hwAll.length - active.length}</b><span>выполнено</span></div></div>`;
   html += active.map((a) => {
     const col = colorOf(a.k);
-    return `<button class="hwitem${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} data-act="hw" data-sk="${esc(a.k)}">` +
+    return `<button class="hwitem${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} data-act="hw" data-sk="${esc(a.k)}" data-tab="${a.tabIdx}">` +
       `<b>${esc(a.name)}</b><span>${esc(a.text)}</span>` +
       `<span class="due">${a.due ? 'Сдать к ' + WD[dow(a.due)] + ', ' + human(a.due) : 'Ближайших пар по предмету нет'}</span></button>`;
   }).join('');

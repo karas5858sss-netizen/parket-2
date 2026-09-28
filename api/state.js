@@ -15,7 +15,7 @@
 
 const { cfg, verifyInitData, redis, docKey, getDoc } = require('../lib/shared');
 
-const HW_MAX = 100;                // длина ДЗ
+const HW_MAX = 300;                // длина ДЗ
 const NAME_MAX = 120;
 const KEY_MAX = 160;
 const MAX_ENTRIES = 2000;
@@ -79,9 +79,25 @@ function applyPatch(doc, patch, now) {
   for (const [k, v] of Object.entries(hw)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;
     if (v === null || typeof v !== 'object') { delete doc.hw[k]; continue; }
-    const text = String(v.text || '').trim().slice(0, HW_MAX);
-    if (!text) { delete doc.hw[k]; continue; }
-    doc.hw[k] = { name: String(v.name || '').slice(0, NAME_MAX), text, done: !!v.done, t: now };
+    let items = [];
+    if (Array.isArray(v.items)) {
+      for (const it of v.items.slice(0, 10)) {
+        if (!it || typeof it !== 'object') continue;
+        const itText = String(it.text || '').trim().slice(0, HW_MAX);
+        if (!itText) continue;
+        items.push({
+          id: String(it.id || Date.now().toString(36)).slice(0, 40),
+          text: itText,
+          done: !!it.done,
+          t: Number(it.t) || now,
+        });
+      }
+    }
+    const text = String(v.text || (items[0] && items[0].text) || '').trim().slice(0, HW_MAX);
+    if (!text && !items.length) { delete doc.hw[k]; continue; }
+    if (!items.length && text) items = [{ id: '1', text, done: !!v.done, t: now }];
+    const done = items.length ? items.every((x) => x.done) : !!v.done;
+    doc.hw[k] = { name: String(v.name || '').slice(0, NAME_MAX), text, done, items, t: now };
   }
   for (const [k, v] of Object.entries(done)) {
     if (k.length > KEY_MAX || BAD_KEYS.has(k)) continue;

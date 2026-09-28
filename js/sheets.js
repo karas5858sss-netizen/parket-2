@@ -6,17 +6,50 @@
 let sheetCtx = null;
 let formCtx = null;
 function closeSheet() {
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.offClick(closeSheet);
+      tg.BackButton.hide();
+    } catch (e) {}
+  }
   sheetCtx = null;
   formCtx = null;
   document.getElementById('sheet').innerHTML = '';
   document.body.style.overflow = '';
 }
+
 function openSheet(o) {
   const doc = curDoc();
   const hw = doc.hw[o.sk];
   const edit = canEdit();
+  sheetCtx = Object.assign({}, o);
+  const existing = hwItems(hw);
+  sheetCtx.items = existing.length
+    ? existing.map((it) => ({ id: it.id, text: it.text, done: it.done, t: it.t }))
+    : (edit ? [{ id: newId(), text: '', done: false, t: Date.now() }] : []);
+
+  if (typeof o.tabIdx === 'number' && o.tabIdx >= 0 && o.tabIdx < sheetCtx.items.length) {
+    sheetCtx.curTab = o.tabIdx;
+  } else {
+    const firstActive = sheetCtx.items.findIndex((it) => !it.done);
+    sheetCtx.curTab = firstActive >= 0 ? firstActive : 0;
+  }
+
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
+  renderSheetContent();
+}
+
+function renderSheetContent() {
+  if (!sheetCtx) return;
+  const doc = curDoc();
+  const edit = canEdit();
+  const o = sheetCtx;
   const l = o.lesson;
-  sheetCtx = o;
   const cc = l && l.custom ? doc.custom[l.cid] : null;
   const own = cc ? `<div class="meta">Своя пара${cc.until ? ', каждую неделю до ' + human(cc.until) : ''}</div>` : '';
   const custBtns = cc && edit
@@ -27,25 +60,45 @@ function openSheet(o) {
   const head = l
     ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(state.profile, l) ? ', ' + pairNo(state.profile, l) + ' пара' : ''}</div>${own}`
     : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
+
+  const items = sheetCtx.items || [];
+  const idx = Math.min(sheetCtx.curTab || 0, Math.max(0, items.length - 1));
+  sheetCtx.curTab = idx;
+  const cur = items[idx] || null;
+
+  let tabsHtml = '';
+  if (items.length > 1 || edit) {
+    tabsHtml = '<div class="hw-tabs" id="hwtabs" role="tablist">' +
+      items.map((it, i) => {
+        const title = (it.done ? '✓ ' : '') + `ДЗ ${i + 1}`;
+        return `<button type="button" class="hw-tab${it.done ? ' done' : ''}" data-act="hw-tab" data-i="${i}" role="tab" aria-selected="${i === idx}" aria-pressed="${i === idx}">${esc(title)}</button>`;
+      }).join('') +
+      (edit && items.length < 10 ? '<button type="button" class="hw-tab add" data-act="hw-add" title="Добавить ещё одно ДЗ" aria-label="Добавить ДЗ">+</button>' : '') +
+      '</div>';
+  }
+
   let body;
   if (edit) {
-    const text = hw ? hw.text : '';
-    const cur = doc.colors[o.sk];
-    const sws = PALETTE.map(([c, n], i) => `<button class="sw" style="--c:${c}" data-act="color" data-i="${i}" aria-label="${n}" aria-pressed="${cur === i}"></button>`).join('') +
-      `<button class="sw none" data-act="color" data-i="-1" aria-label="без цвета" aria-pressed="${!Number.isInteger(cur)}"></button>`;
-    body = `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/100</span>` +
-      `<textarea id="hwtext" rows="3" maxlength="100" placeholder="Что задали">${esc(text)}</textarea></label>` +
+    const text = cur ? cur.text : '';
+    const curColor = doc.colors[o.sk];
+    const sws = PALETTE.map(([c, n], i) => `<button class="sw" style="--c:${c}" data-act="color" data-i="${i}" aria-label="${n}" aria-pressed="${curColor === i}"></button>`).join('') +
+      `<button class="sw none" data-act="color" data-i="-1" aria-label="без цвета" aria-pressed="${!Number.isInteger(curColor)}"></button>`;
+    body = tabsHtml +
+      `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/300</span>` +
+      `<textarea id="hwtext" rows="3" maxlength="300" placeholder="Что задали">${esc(text)}</textarea></label>` +
       `<label>Цвет предмета</label><div class="swatches" id="swatches">${sws}</div><div class="btns">` +
       '<button class="btn primary" data-act="hw-save">Сохранить</button>' +
-      (hw ? `<button class="btn" data-act="hw-toggle">${hw.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
-            '<button class="btn danger" data-act="hw-del">Удалить ДЗ</button>' : '') +
+      (cur && cur.text ? `<button class="btn" data-act="hw-toggle">${cur.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
+            `<button class="btn danger" data-act="hw-del">${items.length > 1 ? 'Удалить это ДЗ' : 'Удалить ДЗ'}</button>` : '') +
       (l ? `<button class="btn" data-act="lesson-done">${doc.done[lkey(l)] ? 'Снять отметку «пройдена»' : 'Отметить пару пройденной'}</button>` : '') +
       custBtns + '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
   } else {
-    body = '<label>ДЗ по предмету</label><div class="view">' +
-      (hw && hw.text ? esc(hw.text) + (hw.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
+    body = tabsHtml +
+      '<label>ДЗ по предмету</label><div class="view">' +
+      (cur && cur.text ? esc(cur.text) + (cur.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
       '<div class="btns"><button class="btn" data-act="sheet-close">Закрыть</button></div>';
   }
+
   document.getElementById('sheet').innerHTML =
     `<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">${head}${body}</div>`;
   document.body.style.overflow = 'hidden';
@@ -76,6 +129,12 @@ function openSettings() {
     `<div class="meta">Версия сборки: ${BUILD}</div>` +
     '<div class="btns"><button class="btn" data-act="sheet-close">Готово</button></div></div>';
   document.body.style.overflow = 'hidden';
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
 }
 
 async function sendTestNotify() {
@@ -132,6 +191,12 @@ function openForm(id, c) {
     '<div class="err" id="f-err" hidden></div>' +
     '<div class="btns"><button class="btn primary" data-act="f-save">Сохранить</button><button class="btn" data-act="sheet-close">Отмена</button></div></div>';
   document.body.style.overflow = 'hidden';
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
 }
 
 function refreshSlotChips() {

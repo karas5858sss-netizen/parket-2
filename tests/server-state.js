@@ -42,9 +42,12 @@ const good = { title: 'Английский', kind: 'пр', date: '2026-09-21', 
   ok('старый документ без новых полей читается с пустыми значениями', old.colors && old.custom && old.prefs && !Object.keys(old.custom).length);
 
   // ---------- ДЗ и отметки ----------
-  await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', text: 'x'.repeat(150), done: false }, '__proto__': { text: 'evil' }, ['k'.repeat(200)]: { text: 'long key' } }, done: { '2026-09-19|08:30|инклюзия': true } });
+  await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', text: 'x'.repeat(400), done: false }, '__proto__': { text: 'evil' }, ['k'.repeat(200)]: { text: 'long key' } }, done: { '2026-09-19|08:30|инклюзия': true } });
   let d = await doc('me');
-  ok('ДЗ обрезается до 100 символов', d.hw['общая психология'].text.length === 100);
+  ok('ДЗ обрезается до 300 символов', d.hw['общая психология'].text.length === 300);
+  await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', items: [{ id: '1', text: 'Задание 1', done: false }, { id: '2', text: 'Задание 2', done: true }] } } });
+  d = await doc('me');
+  ok('сохранение нескольких вкладок ДЗ', d.hw['общая психология'].items.length === 2 && d.hw['общая психология'].items[0].text === 'Задание 1' && d.hw['общая психология'].items[1].done === true);
   ok('«__proto__» и слишком длинные ключи игнорируются', !Object.prototype.hasOwnProperty.call(d.hw, '__proto__') && Object.keys(d.hw).length === 1);
   ok('отметка «пройдена» сохранена', d.done['2026-09-19|08:30|инклюзия'] > 0);
   ok('партнёр видит чужой документ', Object.keys((await doc('me', HER())).hw).length === 1);
