@@ -168,15 +168,27 @@ document.addEventListener('click', (e) => {
     closeSheet();
     return;
   }
+  if (act === 'hw-del-tab' && sheetCtx) {
+    if (e.stopPropagation) e.stopPropagation();
+    const i = Number(b.dataset.i);
+    if (sheetCtx.items && sheetCtx.items.length > 1) {
+      sheetCtx.items.splice(i, 1);
+      sheetCtx.curTab = Math.max(0, Math.min(sheetCtx.curTab, sheetCtx.items.length - 1));
+      saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
+      renderSheetContent();
+    }
+    return;
+  }
   if (act === 'hw-del' && sheetCtx) {
     if (sheetCtx.items && sheetCtx.items.length > 1) {
       sheetCtx.items.splice(sheetCtx.curTab, 1);
       sheetCtx.curTab = Math.max(0, sheetCtx.curTab - 1);
       saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
+      renderSheetContent();
     } else {
       save({ hw: { [sheetCtx.sk]: null } });
+      closeSheet();
     }
-    closeSheet();
     return;
   }
   if (act === 'lesson-done' && sheetCtx && sheetCtx.lesson) {

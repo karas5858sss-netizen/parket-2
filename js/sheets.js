@@ -71,7 +71,11 @@ function renderSheetContent() {
     tabsHtml = '<div class="hw-tabs" id="hwtabs" role="tablist">' +
       items.map((it, i) => {
         const title = (it.done ? '✓ ' : '') + `ДЗ ${i + 1}`;
-        return `<button type="button" class="hw-tab${it.done ? ' done' : ''}" data-act="hw-tab" data-i="${i}" role="tab" aria-selected="${i === idx}" aria-pressed="${i === idx}">${esc(title)}</button>`;
+        const isSel = i === idx;
+        const closeX = (edit && items.length > 1 && isSel)
+          ? `<span class="hw-tab-x" data-act="hw-del-tab" data-i="${i}" title="Удалить это ДЗ" aria-label="Удалить">×</span>`
+          : '';
+        return `<button type="button" class="hw-tab${it.done ? ' done' : ''}" data-act="hw-tab" data-i="${i}" role="tab" aria-selected="${i === idx}" aria-pressed="${i === idx}"><span>${esc(title)}</span>${closeX}</button>`;
       }).join('') +
       (edit && items.length < 10 ? '<button type="button" class="hw-tab add" data-act="hw-add" title="Добавить ещё одно ДЗ" aria-label="Добавить ДЗ">+</button>' : '') +
       '</div>';
@@ -83,13 +87,15 @@ function renderSheetContent() {
     const curColor = doc.colors[o.sk];
     const sws = PALETTE.map(([c, n], i) => `<button class="sw" style="--c:${c}" data-act="color" data-i="${i}" aria-label="${n}" aria-pressed="${curColor === i}"></button>`).join('') +
       `<button class="sw none" data-act="color" data-i="-1" aria-label="без цвета" aria-pressed="${!Number.isInteger(curColor)}"></button>`;
+    const hasMultiple = items.length > 1;
+    const hasText = cur && cur.text && cur.text.trim();
     body = tabsHtml +
       `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/300</span>` +
       `<textarea id="hwtext" rows="3" maxlength="300" placeholder="Что задали">${esc(text)}</textarea></label>` +
       `<label>Цвет предмета</label><div class="swatches" id="swatches">${sws}</div><div class="btns">` +
       '<button class="btn primary" data-act="hw-save">Сохранить</button>' +
-      (cur && cur.text ? `<button class="btn" data-act="hw-toggle">${cur.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` +
-            `<button class="btn danger" data-act="hw-del">${items.length > 1 ? 'Удалить это ДЗ' : 'Удалить ДЗ'}</button>` : '') +
+      (hasText ? `<button class="btn" data-act="hw-toggle">${cur.done ? 'Вернуть в активные' : 'ДЗ выполнено'}</button>` : '') +
+      (hasMultiple || hasText ? `<button class="btn danger" data-act="hw-del">${hasMultiple ? `Удалить эту вкладку (ДЗ ${idx + 1})` : 'Удалить ДЗ'}</button>` : '') +
       (l ? `<button class="btn" data-act="lesson-done">${doc.done[lkey(l)] ? 'Снять отметку «пройдена»' : 'Отметить пару пройденной'}</button>` : '') +
       custBtns + '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
   } else {

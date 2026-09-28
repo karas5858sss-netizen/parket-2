@@ -3,7 +3,7 @@
 (window.PARTS = window.PARTS || []).push('core');
 
 // Версия сборки: меняй при выкладке, она видна внизу «Настроек» (чтобы понять, что телефон получил свежие файлы).
-const BUILD = '2026-09-28.1';
+const BUILD = '2026-09-28.2';
 
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
