@@ -10,7 +10,10 @@ const ok = (name, cond) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + name);
 (async () => {
   const posts = [], confirms = [];
   const docs = { her: { hw: {}, done: {}, colors: {}, custom: {} },
-                 me: { hw: {}, done: {}, colors: {}, custom: { k1: { title: 'Консультация', kind: '', date: '2026-09-19', start: '10:00', end: '10:45', room: '3-12', teacher: '' } } } };
+                 me: { hw: {}, done: {}, colors: {}, custom: {
+                   k1: { title: 'Консультация', kind: '', date: '2026-09-19', start: '10:00', end: '10:45', room: '3-12', teacher: '' },
+                   k2: { title: 'Поход в кино', kind: '', date: '2026-09-19', start: '20:00', end: '22:00', room: 'Кинотеатр', teacher: '', both: true },
+                 } } };
   const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'https://parket-2.vercel.app/', pretendToBeVisual: true,
     beforeParse(w) {
       w.__NOW = '2026-09-19T07:00:00';
@@ -31,6 +34,7 @@ const ok = (name, cond) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + name);
   const lastCustom = () => { const p = [...posts].reverse().find(x => x.custom); return p ? Object.values(p.custom)[0] : undefined; };
   const cards = () => [...d.querySelectorAll('.lesson')].filter(a => a.textContent.includes('Английский'));
 
+  ok('совместное мероприятие партнёра видно с бейджем «вместе»', txt().includes('Поход в кино') && txt().includes('вместе'));
   ok('FAB «+» есть в своём профиле', !!d.querySelector('.fab'));
   await click('.fab');
   ok('форма открыта, дата по умолчанию — сегодня', !!d.getElementById('f-title') && d.getElementById('f-date').value === '2026-09-19');

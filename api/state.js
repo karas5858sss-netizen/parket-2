@@ -43,6 +43,7 @@ function cleanCustom(v, now) {
     title, kind, date: v.date, start: v.start, end: v.end,
     room: String(v.room || '').trim().slice(0, 40),
     teacher: String(v.teacher || '').trim().slice(0, 60),
+    both: !!v.both,
     t: now,
   };
   if (v.until) {

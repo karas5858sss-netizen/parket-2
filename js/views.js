@@ -122,6 +122,7 @@ function resultsHTML(all) {
   const toks = norm(state.q).split(/\s+/).filter(Boolean);
   const list = all.filter((l) => {
     if (!state.past && l.date < today) return false;
+    if (state.kind !== 'all' && l.kind !== state.kind) return false;
     if (state.onlyHw) {
       const h = doc.hw[skey(l)];
       const act = hwItems(h).filter((x) => !x.done && x.text);
@@ -181,7 +182,7 @@ function viewSubjects(all) {
       const kind = l.kind ? `<span class="badge k-${KIND_CLS[l.kind] || 'other'}">${esc(l.kind)}</span>` : '';
       const chg = changeFor(l);
       const chgB = chg ? `<span class="badge k-chg">${{ moved: 'перенесена', changed: 'изменено', added: 'новая' }[chg.type]}</span>` : '';
-      const own = l.custom ? '<span class="badge k-own">своя</span>' : '';
+      const own = l.custom ? (l.both ? '<span class="badge k-both">вместе 👫</span>' : '<span class="badge k-own">своя</span>') : '';
       const col = colorOf(x.k);
       const hw = doc.hw[x.k];
       const act = hwItems(hw).filter((it) => !it.done && it.text);

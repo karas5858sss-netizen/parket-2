@@ -60,14 +60,20 @@ document.addEventListener('click', (e) => {
   }
   if (act === 'add') { if (canEdit()) openForm(null, null); return; }
   if (act === 'c-edit' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
-    const id = sheetCtx.lesson.cid;
-    openForm(id, curDoc().custom[id]);
+    const l = sheetCtx.lesson;
+    const owner = l.owner || state.profile;
+    const ownerDoc = state.docs && state.docs[owner];
+    const id = l.cid;
+    const item = (ownerDoc && ownerDoc.custom && ownerDoc.custom[id]) || curDoc().custom[id];
+    if (item) openForm(id, item);
     return;
   }
   if (act === 'c-skip' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
     const l = sheetCtx.lesson;
-    const old = curDoc().custom[l.cid];
-    if (old) {
+    const owner = l.owner || state.profile;
+    const ownerDoc = state.docs && state.docs[owner];
+    const old = (ownerDoc && ownerDoc.custom && ownerDoc.custom[l.cid]) || curDoc().custom[l.cid];
+    if (old && owner === state.who) {
       const skip = Array.from(new Set((old.skip || []).concat(l.date)));
       save({ custom: { [l.cid]: Object.assign({}, old, { skip }) } });
       closeSheet();
@@ -77,13 +83,21 @@ document.addEventListener('click', (e) => {
   }
   if (act === 'c-del' && sheetCtx && sheetCtx.lesson && sheetCtx.lesson.custom) {
     const l = sheetCtx.lesson;
-    const old = curDoc().custom[l.cid];
-    if (!old) return;
-    confirmTG(old.until ? 'Удалить всю серию «' + old.title + '»?' : 'Удалить пару «' + old.title + '»?', () => {
+    const owner = l.owner || state.profile;
+    const ownerDoc = state.docs && state.docs[owner];
+    const old = (ownerDoc && ownerDoc.custom && ownerDoc.custom[l.cid]) || curDoc().custom[l.cid];
+    if (!old || owner !== state.who) return;
+    const msg = old.until ? 'Удалить всю серию «' + old.title + '»?' : 'Удалить «' + old.title + '»?';
+    confirmTG(msg, () => {
       save({ custom: { [l.cid]: null } });
       closeSheet();
-      toast('Пара удалена', () => save({ custom: { [l.cid]: old } }));
+      toast('Удалено', () => save({ custom: { [l.cid]: old } }));
     });
+    return;
+  }
+  if (act === 'f-both' && formCtx) {
+    formCtx.both = b.dataset.v === '1';
+    document.querySelectorAll('#f-both-chips .chip').forEach((el) => el.setAttribute('aria-pressed', String(el.dataset.v === b.dataset.v)));
     return;
   }
   if (act === 'f-kind' && formCtx) {

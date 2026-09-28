@@ -50,12 +50,16 @@ function renderSheetContent() {
   const edit = canEdit();
   const o = sheetCtx;
   const l = o.lesson;
-  const cc = l && l.custom ? doc.custom[l.cid] : null;
-  const own = cc ? `<div class="meta">Своя пара${cc.until ? ', каждую неделю до ' + human(cc.until) : ''}</div>` : '';
-  const custBtns = cc && edit
-    ? '<button class="btn" data-act="c-edit">Изменить пару</button>' +
+  const owner = l && l.custom ? (l.owner || state.profile) : null;
+  const ownerDoc = owner && state.docs ? state.docs[owner] : doc;
+  const cc = l && l.custom && ownerDoc && ownerDoc.custom ? ownerDoc.custom[l.cid] : null;
+  const isMine = !owner || owner === state.who;
+  const ownDesc = cc ? (cc.both ? 'Совместное мероприятие 👫' : 'Своя пара') + (cc.until ? ', каждую неделю до ' + human(cc.until) : '') + (cc.both && !isMine ? ` (добавил${owner === 'me' ? ' Кирилл' : 'а Маша'})` : '') : '';
+  const own = ownDesc ? `<div class="meta">${ownDesc}</div>` : '';
+  const custBtns = cc && isMine
+    ? '<button class="btn" data-act="c-edit">' + (cc.both ? 'Изменить мероприятие' : 'Изменить пару') + '</button>' +
       (cc.until ? '<button class="btn" data-act="c-skip">Пропустить только эту дату</button>' : '') +
-      `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : 'Удалить пару'}</button>`
+      `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : (cc.both ? 'Удалить мероприятие' : 'Удалить пару')}</button>`
     : '';
   const head = l
     ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(state.profile, l) ? ', ' + pairNo(state.profile, l) + ' пара' : ''}</div>${own}`
@@ -176,22 +180,29 @@ const newId = () => (Date.now().toString(36) + Math.random().toString(36).slice(
 
 function openForm(id, c) {
   closeSheet();
-  formCtx = { id: id || newId(), kind: c ? c.kind || '' : '', weekly: !!(c && c.until), skip: c && c.skip ? c.skip : [] };
-  const v = c || { title: '', date: defaultDate(), start: '', end: '', room: '', teacher: '', until: '' };
+  formCtx = {
+    id: id || newId(),
+    kind: c ? c.kind || '' : '',
+    weekly: !!(c && c.until),
+    both: !!(c && c.both),
+    skip: c && c.skip ? c.skip : [],
+  };
+  const v = c || { title: '', date: defaultDate(), start: '', end: '', room: '', teacher: '', until: '', both: false };
   const chips = (act, opts, cur) => opts.map(([val, t]) =>
     `<button class="chip" type="button" data-act="${act}" data-v="${val}" aria-pressed="${cur === val}">${t}</button>`).join('');
   document.getElementById('sheet').innerHTML =
     '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
-    `<div class="ttl">${c ? 'Изменить пару' : 'Своя пара'}</div>` +
-    `<label>Название<input id="f-title" class="in" maxlength="80" autocomplete="off" value="${esc(v.title)}"></label>` +
+    `<div class="ttl">${c ? (c.both ? 'Изменить совместное мероприятие' : 'Изменить пару') : 'Своё событие'}</div>` +
+    `<label>Формат</label><div class="chips" id="f-both-chips">${chips('f-both', [['0', 'Личное'], ['1', 'Вместе 👫']], formCtx.both ? '1' : '0')}</div>` +
+    `<label>Название<input id="f-title" class="in" maxlength="80" autocomplete="off" placeholder="Название пары или события" value="${esc(v.title)}"></label>` +
     `<label>Тип</label><div class="chips" id="f-kinds">${chips('f-kind', [['', 'Без типа'], ['лек', 'лек'], ['пр', 'пр'], ['лаб', 'лаб']], formCtx.kind)}</div>` +
     `<label>Дата<input id="f-date" class="in" type="date" value="${esc(v.date)}"></label>` +
     `<div class="row2"><label>Начало<input id="f-start" class="in" type="time" value="${esc(v.start)}"></label>` +
     `<label>Конец<input id="f-end" class="in" type="time" value="${esc(v.end)}"></label></div>` +
     '<label>Номер пары (подставит время)</label><div class="chips" id="f-slots">' +
     (SLOTS[state.profile] || []).map(([st, en], i) => `<button class="chip" type="button" data-act="f-slot" data-v="${i}" aria-pressed="${v.start === st && v.end === en}">${i + 1}</button>`).join('') + '</div>' +
-    `<label>Аудитория<input id="f-room" class="in" maxlength="40" autocomplete="off" value="${esc(v.room)}"></label>` +
-    `<label>Преподаватель<input id="f-teacher" class="in" maxlength="60" autocomplete="off" value="${esc(v.teacher)}"></label>` +
+    `<label>Место / Аудитория<input id="f-room" class="in" maxlength="40" autocomplete="off" placeholder="Аудитория, кино, парк..." value="${esc(v.room)}"></label>` +
+    `<label>Преподаватель / Заметка<input id="f-teacher" class="in" maxlength="60" autocomplete="off" value="${esc(v.teacher)}"></label>` +
     `<label>Повтор</label><div class="chips" id="f-repeats">${chips('f-repeat', [['0', 'Не повторять'], ['1', 'Каждую неделю']], formCtx.weekly ? '1' : '0')}</div>` +
     `<label id="f-until-wrap"${formCtx.weekly ? '' : ' hidden'}>Повторять до<input id="f-until" class="in" type="date" value="${esc(v.until || '')}"></label>` +
     '<div class="err" id="f-err" hidden></div>' +
@@ -220,7 +231,7 @@ function saveForm() {
   const title = val('f-title'), date = val('f-date'), start = val('f-start'), end = val('f-end');
   const until = formCtx.weekly ? val('f-until') : '';
   let err = '';
-  if (!title) err = 'Введи название пары.';
+  if (!title) err = 'Введи название.';
   else if (!date) err = 'Выбери дату.';
   else if (!start || !end) err = 'Укажи время начала и конца.';
   else if (end <= start) err = 'Конец должен быть позже начала.';
@@ -234,7 +245,7 @@ function saveForm() {
     box.textContent = err; box.hidden = false;
     return;
   }
-  const entry = { title, kind: formCtx.kind, date, start, end, room: val('f-room'), teacher: val('f-teacher') };
+  const entry = { title, kind: formCtx.kind, date, start, end, room: val('f-room'), teacher: val('f-teacher'), both: !!formCtx.both };
   if (until) {
     entry.until = until;
     const skip = formCtx.skip.filter((d) => d >= date && d <= until && ((Date.parse(d) - Date.parse(date)) / 864e5) % 7 === 0);

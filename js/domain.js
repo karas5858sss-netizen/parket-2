@@ -25,7 +25,7 @@ const hwItems = (h) => {
 };
 
 // ---------- свои пары: превращаем записи в обычные карточки ----------
-function expandCustom(id, c) {
+function expandCustom(id, c, owner) {
   const skip = new Set(c.skip || []);
   const dates = [];
   if (c.until) { for (let d = c.date, n = 0; d <= c.until && n <= 60; d = addDays(d, 7), n++) dates.push(d); } else dates.push(c.date);
@@ -33,15 +33,28 @@ function expandCustom(id, c) {
     id: 'c:' + id + ':' + d, cid: id, custom: true, date: d, start: c.start, end: c.end,
     startAt: d + 'T' + c.start + ':00', endAt: d + 'T' + c.end + ':00', num: 0,
     kind: c.kind || null, subject: c.title, title: c.title, teacher: c.teacher || '', room: c.room || '',
-    color: null, subgroup: 0, weekType: 0, replaced: false,
+    color: null, subgroup: 0, weekType: 0, replaced: false, both: !!c.both, owner: owner || null,
   }));
 }
 function allLessons(profile) {
   const p = profile || state.profile;
   const base = (state.data[p] || {}).lessons || [];
-  const doc = state.docs[p];
+  const doc = state.docs && state.docs[p];
+  const partner = p === 'me' ? 'her' : 'me';
+  const partnerDoc = state.docs && state.docs[partner];
   const extra = [];
-  if (doc && doc.custom) for (const [id, c] of Object.entries(doc.custom)) extra.push(...expandCustom(id, c));
+  if (doc && doc.custom) {
+    for (const [id, c] of Object.entries(doc.custom)) {
+      if (c) extra.push(...expandCustom(id, c, p));
+    }
+  }
+  if (partnerDoc && partnerDoc.custom) {
+    for (const [id, c] of Object.entries(partnerDoc.custom)) {
+      if (c && c.both && (!doc || !doc.custom || !doc.custom[id])) {
+        extra.push(...expandCustom(id, c, partner));
+      }
+    }
+  }
   if (!extra.length) return base;
   return base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
 }

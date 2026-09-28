@@ -82,6 +82,9 @@ const good = { title: 'Английский', kind: 'пр', date: '2026-09-21', 
   }
   await run('POST', ME(), { custom: { c9: { ...good, kind: 'экз' } } });
   ok('неизвестный тип пары сводится к пустому', (await doc('me')).custom.c9.kind === '');
+  await run('POST', ME(), { custom: { c_both: { ...good, both: true } } });
+  ok('совместное мероприятие: сохраняется both: true', (await doc('me')).custom.c_both.both === true);
+  await run('POST', ME(), { custom: { c_both: null } });
   await run('POST', ME(), { custom: { c10: { ...good, title: 'Я'.repeat(120) } } });
   ok('название обрезается до 80 символов', (await doc('me')).custom.c10.title.length === 80);
   await run('POST', ME(), { custom: { c11: { ...good, skip: ['2026-10-05', 'мусор', 5, '2026-10-12'] } } });

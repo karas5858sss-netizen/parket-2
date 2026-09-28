@@ -50,7 +50,7 @@ function lessonHTML(l) {
   if (chg && chg.type === 'moved' && chg.was) meta += `<div class="meta">Было: ${WD[dow(chg.was.d)]}, ${human(chg.was.d)}, ${esc(chg.was.s)}</div>`;
   return `<article class="lesson${done ? ' isdone' : ''}${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''} tabindex="0" role="button" data-act="open" data-k="${esc(lkey(l))}">` +
     `<div class="t"><b>${esc(l.start)}</b><span>${esc(l.end)}</span>${pairNo(state.profile, l) ? `<span class="pn">${pairNo(state.profile, l)} пара</span>` : ''}</div>` +
-    `<div><div class="ttl">${badge}${chgBadge}${l.custom ? '<span class="badge k-own">своя</span>' : ''}${esc(l.subject)}</div>${meta}</div></article>`;
+    `<div><div class="ttl">${badge}${chgBadge}${l.custom ? (l.both ? '<span class="badge k-both">вместе 👫</span>' : '<span class="badge k-own">своя</span>') : ''}${esc(l.subject)}</div>${meta}</div></article>`;
 }
 
 function hwListHTML() {
