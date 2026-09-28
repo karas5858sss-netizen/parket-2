@@ -7,7 +7,7 @@
 // Необязательная: APP_URL — адрес приложения для кнопки «Открыть расписание»
 // (по умолчанию берётся из заголовка запроса, то есть боевой домен).
 
-const { cfg, verifyInitData, getDoc, safeEqual, appBase, fetchSchedule } = require('../lib/shared');
+const { cfg, verifyInitData, getDoc, safeEqual, appBase, fetchSchedule, getLastNotified, setLastNotified } = require('../lib/shared');
 const { buildDigest, mskNow, addDays } = require('../lib/digest');
 const { refreshChanges } = require('../lib/detect');
 const { LOG_MAX_AGE_DAYS } = require('../lib/changes');
@@ -85,16 +85,24 @@ module.exports = async (req, res) => {
   // и для сравнения версий (передаём его в refreshChanges вместо того, чтобы она грузила его сама).
   let scheduleFull;
   let docs;
+  let lastNotified;
   try {
-    const [sMe, sHer, dMe, dHer] = await Promise.all([
+    const [sMe, sHer, dMe, dHer, nMe, nHer] = await Promise.all([
       fetchSchedule(base, 'me'), fetchSchedule(base, 'her'), getDoc('me'), getDoc('her'),
+      getLastNotified('me'), getLastNotified('her'),
     ]);
     scheduleFull = { me: sMe, her: sHer };
     docs = { me: dMe, her: dHer };
+    lastNotified = { me: nMe, her: nHer };
   } catch (e) {
     return res.status(502).json({ error: 'storage_failed', message: String((e && e.message) || e) });
   }
-  const schedules = { me: scheduleFull.me && scheduleFull.me.lessons, her: scheduleFull.her && scheduleFull.her.lessons };
+  // Частично загруженное расписание (часть недель не ответила — есть errors) не идёт в текст
+  // напоминания: лучше промолчать про профиль, чем сказать неправду («пар нет» или неполный
+  // список пар только потому, что кусок расписания не успел прийти). Обнаружение изменений уже
+  // отдельно пропускает такие случаи в lib/detect.js — здесь та же осторожность нужна для digest.
+  const usable = (s) => !!(s && Array.isArray(s.lessons) && (!s.errors || !s.errors.length));
+  const schedules = { me: usable(scheduleFull.me) ? scheduleFull.me.lessons : null, her: usable(scheduleFull.her) ? scheduleFull.her.lessons : null };
 
   // журнал изменений: расписание уже загружено выше, сверяем на его основе, потом берём непрочитанное
   let logs = { me: [], her: [] };
@@ -102,20 +110,34 @@ module.exports = async (req, res) => {
     logs = (await refreshChanges({ base, today: now.slice(0, 10), nowIso: new Date(Date.now()).toISOString(), schedules: scheduleFull })).items;
   } catch (e) { /* без изменений письмо всё равно уйдёт */ }
   const since = new Date(Date.now() - CHANGES_WINDOW_MS).toISOString();
+  // Не повторяем то, что уже увидели В ПРИЛОЖЕНИИ (prefs.seen), и не повторяем то, что уже
+  // ОТПРАВИЛИ раньше через Telegram (lastNotified) — какая из двух отметок новее, та и действует.
   const changesFor = (who) => {
     const seen = (docs[who].prefs && docs[who].prefs.seen && docs[who].prefs.seen[who]) || '';
-    return (logs[who] || []).filter((e) => e.t > seen && e.t >= since && (e.type === 'published' || !e.date || e.date >= now.slice(0, 10)));
+    const cutoff = seen > lastNotified[who] ? seen : lastNotified[who];
+    return (logs[who] || []).filter((e) => e.t > cutoff && e.t >= since && (e.type === 'published' || !e.date || e.date >= now.slice(0, 10)));
   };
 
   const results = [];
   for (const who of targets) {
     if (!manual && docs[who].prefs && docs[who].prefs.notify === false) { results.push({ who, skipped: 'disabled' }); continue; }
-    if (!schedules[who]) { results.push({ who, error: 'schedule_unavailable' }); continue; }
+    if (!schedules[who]) {
+      // Различаем причину для логов: расписание вообще не пришло — или пришло, но частично.
+      results.push({ who, error: scheduleFull[who] ? 'schedule_partial' : 'schedule_unavailable' });
+      continue;
+    }
     const chatId = c.tgId[who];
     if (!chatId) { results.push({ who, error: 'no_telegram_id' }); continue; }
+    const changes = changesFor(who);
     try {
-      await sendTelegram(c.botToken, chatId, buildDigest({ who, date, now, schedules, docs, changes: changesFor(who) }), base);
+      await sendTelegram(c.botToken, chatId, buildDigest({ who, date, now, schedules, docs, changes }), base);
       results.push({ who, sent: true });
+      // Отметку двигаем только сюда — после ПОДТВЕРЖДЁННОЙ отправки, и только если правда что-то
+      // рассказали: неудачная попытка или пустой список изменений не должны сдвигать отметку.
+      if (changes.length) {
+        const maxT = changes.reduce((m, e) => (e.t > m ? e.t : m), '');
+        try { await setLastNotified(who, maxT); } catch (e) { console.error('notify: не удалось сохранить lastNotified', who, String((e && e.message) || e)); }
+      }
     } catch (e) {
       results.push({ who, error: String((e && e.message) || e) });
     }
