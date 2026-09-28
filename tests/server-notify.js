@@ -10,7 +10,7 @@ const setNow = (iso) => { Date.now = () => Date.parse(iso); };
 setNow('2026-09-20T17:00:00Z');          // 20:00 МСК, воскресенье -> завтра пн 21.09
 
 const L = (date, s, e, subject, kind, room = '') => ({ id: Math.random(), date, start: s, end: e, startAt: date + 'T' + s + ':00', endAt: date + 'T' + e + ':00', kind, subject, teacher: 'Т.Т.', room });
-let sched, docs, tgCalls, tgFail, herSchedDown;
+let sched, docs, tgCalls, tgFail, herSchedDown, schedErrors;
 const reset = () => {
   sched = {
     me: [L('2026-09-21','09:40','11:10','Конструкция и прочность','лек','2206 - Аудитория для практических занятий'), L('2026-09-24','09:40','11:10','Горюче-смазочные материалы','лек','2113')],
@@ -21,14 +21,14 @@ const reset = () => {
           done: {}, colors: {}, custom: { e1: { title: 'Английский', kind: 'пр', date: '2026-09-21', start: '18:00', end: '19:30', room: '204', teacher: '', until: '2026-10-05' } }, prefs: {} },
     her: { hw: { 'основы российской государственности': { name: 'Основы российской государственности', text: 'Конспект', done: false, t: 1 } }, done: {}, colors: {}, custom: {}, prefs: {} },
   };
-  tgCalls = []; tgFail = null; herSchedDown = false; kv = makeKV();
+  tgCalls = []; tgFail = null; herSchedDown = false; schedErrors = { me: [], her: [] }; kv = makeKV();
 };
 global.fetch = async (url, opts = {}) => {
   const j = (status, body) => ({ ok: status < 400, status, json: async () => body });
   if (/^https:\/\/(parket-2\.vercel\.app|custom\.example\.org)\/api\/schedule\?profile=/.test(url)) {
     const p = url.split('=')[1];
     if (p === 'her' && herSchedDown) return j(500, {});
-    return j(200, { lessons: sched[p] });
+    return j(200, { lessons: sched[p], errors: schedErrors[p] });
   }
   if (url === 'https://redis.test') { const cmd = JSON.parse(opts.body); if (cmd[0] === 'GET' && cmd[1].startsWith('parket:v1:doc:')) return j(200, { result: JSON.stringify(docs[cmd[1].split(':').pop()]) }); return j(200, { result: kv.exec(cmd) }); }
   if (url.startsWith('https://api.telegram.org/bot')) {
@@ -87,9 +87,28 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   const r3 = await run('POST', { 'x-init-data': sign({ id: 111 }) });
   ok('«прислать пример»: уходит только нажавшему, даже если напоминания выключены', r3.code === 200 && tgCalls.length === 1 && String(tgCalls[0].chat_id) === '111');
 
+
+  // ---------- частично загруженное расписание не идёт в текст напоминания (см. api/notify.js: usable()) ----------
+  reset(); schedErrors.me = [{ sdate: '2026-09-28', error: 'HTTP 500' }]; // у Кирилла часть недель не загрузилась
+  const rp1 = await run('GET', CRON);
+  ok('Кириллу с частичным расписанием дайджест не уходит (ошибка «schedule_partial», не «пар нет»)',
+    rp1.body.results.find(x => x.who === 'me').error === 'schedule_partial' && !tgCalls.some((c) => String(c.chat_id) === '111'), rp1.body);
+  ok('при этом Маше её собственный дайджест всё равно приходит', rp1.body.results.find(x => x.who === 'her').sent === true && msgTo('222').length > 0);
+  ok('в дайджесте Маши нет раздела «Кирилл завтра» — про его частичное расписание молчим, а не гадаем', !msgTo('222').includes('Кирилл завтра'), msgTo('222'));
+
+  reset(); schedErrors.her = [{ sdate: '2026-09-21', error: 'timeout' }]; // у Маши часть недель не загрузилась
+  const rp2 = await run('GET', CRON);
+  ok('Маше с частичным расписанием дайджест не уходит', rp2.body.results.find(x => x.who === 'her').error === 'schedule_partial' && !tgCalls.some((c) => String(c.chat_id) === '222'));
+  ok('Кирилл получает свой дайджест, но без раздела про Машу', msgTo('111').length > 0 && !msgTo('111').includes('Маша завтра'), msgTo('111'));
+
+  reset(); schedErrors.me = [{ sdate: '2026-09-28', error: 'HTTP 500' }];
+  const rp3 = await run('POST', { 'x-init-data': sign({ id: 111 }) }); // «прислать пример» тоже не должен слать неполные данные
+  ok('«прислать пример» при частичном расписании: 502 с понятной причиной, ничего не отправлено', rp3.code === 502 && rp3.body.error === 'schedule_partial' && tgCalls.length === 0, rp3.body);
+
   reset(); herSchedDown = true;
   const r4 = await run('GET', CRON);
   ok('расписание Маши недоступно: Кириллу приходит без блока про Машу', r4.code === 200 && msgTo('111').length > 0 && !msgTo('111').includes('Маша завтра') && r4.body.results.find(x => x.who === 'her').error === 'schedule_unavailable');
+  ok('полный отказ и частичный отказ различаются в отчёте («unavailable» ≠ «partial»)', r4.body.results.find(x => x.who === 'her').error === 'schedule_unavailable');
 
   reset(); tgFail = { chat: '222', msg: 'Forbidden: bot was blocked by the user' };
   const r5 = await run('GET', CRON);
@@ -131,6 +150,68 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   ok('Маше раздела нет (в её журнале ничего)', !msgTo('222').includes('Изменилось в расписании'));
   reset(); await run('GET', CRON);
   ok('без изменений раздела нет вовсе', !msgTo('111').includes('Изменилось'));
+  // ---------- lastNotificationAt: одно и то же изменение не повторяется каждый вечер ----------
+  // Раньше единственной защитой от повтора было prefs.seen («прочитано в приложении»); если
+  // человек читает расписание только через сообщения бота, одно и то же изменение приходило бы
+  // заново КАЖДЫЙ вечер. Теперь после подтверждённой отправки сервер сам запоминает границу.
+  reset();
+  kv.exec(['SET', 'parket:v1:chg:me', JSON.stringify([
+    E('N1', '2026-09-20T10:00:00.000Z', 'moved', '2026-09-21', 'Перенесена: Физра, пн 21 сентября'),
+  ])]);
+  let rn = await run('GET', CRON);
+  ok('первая отправка: изменение попало в сообщение', msgTo('111').includes('Перенесена: Физра'));
+  ok('после успешной отправки отметка lastNotified сохранена (равна времени записи)', kv.get('parket:v1:notified:me') === '2026-09-20T10:00:00.000Z', kv.get('parket:v1:notified:me'));
+
+  tgCalls = [];
+  const rn2 = await run('GET', CRON); // ни prefs.seen, ни что-либо ещё не менялось
+  ok('на следующий вечер БЕЗ отметки «Прочитано» в приложении то же изменение уже НЕ повторяется', !msgTo('111').includes('Перенесена: Физра'), msgTo('111'));
+
+  kv.exec(['SET', 'parket:v1:chg:me', JSON.stringify([
+    { id: 'N1', t: '2026-09-20T10:00:00.000Z', type: 'moved', date: '2026-09-21', text: 'Перенесена: Физра, пн 21 сентября', fields: [] },
+    E('N2', '2026-09-21T09:00:00.000Z', 'added', '2026-09-24', 'Добавлена: Новая пара'),
+  ])]);
+  tgCalls = [];
+  await run('GET', CRON);
+  ok('а вот НОВОЕ изменение (появилось позже отметки) в сообщение попадает как обычно', msgTo('111').includes('Добавлена: Новая пара') && !msgTo('111').includes('Перенесена: Физра'), msgTo('111'));
+  ok('отметка сдвинулась до времени этой новой записи', kv.get('parket:v1:notified:me') === '2026-09-21T09:00:00.000Z');
+
+  // ---------- неудачная отправка не двигает отметку — иначе изменение потерялось бы навсегда ----------
+  reset();
+  kv.exec(['SET', 'parket:v1:chg:me', JSON.stringify([
+    E('F1', '2026-09-20T10:00:00.000Z', 'added', '2026-09-24', 'Добавлена: Не дошедшая с первого раза'),
+  ])]);
+  tgFail = { chat: '111', msg: 'Forbidden: bot was blocked by the user' };
+  await run('GET', CRON);
+  ok('отправка не удалась: отметка НЕ сохранена', kv.get('parket:v1:notified:me') === null, kv.get('parket:v1:notified:me'));
+  tgFail = null; tgCalls = [];
+  await run('GET', CRON);
+  ok('на следующий вечер (уже без сбоя) это же изменение всё-таки доходит', msgTo('111').includes('Не дошедшая с первого раза'));
+  ok('и только теперь отметка сохраняется', kv.get('parket:v1:notified:me') === '2026-09-20T10:00:00.000Z');
+
+  // ---------- пустой список изменений не трогает отметку (нечего запоминать) ----------
+  reset();
+  await run('GET', CRON);
+  ok('без изменений в журнале отметка lastNotified не создаётся вовсе', kv.get('parket:v1:notified:me') === null && kv.get('parket:v1:notified:her') === null);
+
+  // ---------- «Прочитано» в приложении подавляет так же, как и отправка — какая отметка новее ----------
+  reset();
+  kv.exec(['SET', 'parket:v1:chg:me', JSON.stringify([
+    E('S1', '2026-09-20T10:00:00.000Z', 'added', '2026-09-24', 'Добавлена: Уже прочитанная в приложении'),
+  ])]);
+  docs.me.prefs = { seen: { me: '2026-09-20T12:00:00.000Z' } }; // прочитано ПОСЛЕ появления записи, ДО отправки
+  await run('GET', CRON);
+  ok('уже прочитанное в приложении не шлётся, даже если lastNotified ещё не сдвигали', !msgTo('111').includes('Уже прочитанная'));
+  ok('и раз ничего не отправили, отметка lastNotified тоже не создаётся', kv.get('parket:v1:notified:me') === null);
+
+  // ---------- ручная «прислать пример» тоже считается подтверждённой отправкой ----------
+  reset();
+  kv.exec(['SET', 'parket:v1:chg:me', JSON.stringify([
+    E('M1', '2026-09-20T10:00:00.000Z', 'added', '2026-09-24', 'Добавлена: Через ручную отправку'),
+  ])]);
+  await run('POST', { 'x-init-data': sign({ id: 111 }) });
+  ok('после «прислать пример» отметка тоже сохраняется', kv.get('parket:v1:notified:me') === '2026-09-20T10:00:00.000Z');
+  ok('чужая (её) отметка не тронута', kv.get('parket:v1:notified:her') === null);
+
   // ---------- окно теперь не 30 часов, а срок жизни журнала (см. lib/changes.js LOG_MAX_AGE_DAYS) ----------
   // now = 2026-09-20T17:00. Запись обнаружена ~2 суток назад (2026-09-18T17:00) — при старом
   // окне в 30 часов она бы отсеклась по возрасту; при новом (несколько недель) должна дойти.
