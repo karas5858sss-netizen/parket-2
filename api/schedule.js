@@ -103,9 +103,10 @@ async function pool(items, fn, limit) {
 // startAt/endAt собираем сами из даты и времени, а не берём на веру из полей вуза.
 const KIND = /^(лек|пр|лаб|сем)\.?\s+/i;
 function normalize(x) {
+  if (!x || typeof x !== 'object') return null;
   const title = String(x['дисциплина'] || '').trim();
   const m = title.match(KIND);
-  const date = String(x['дата']).slice(0, 10);
+  const date = String(x['дата'] || '').slice(0, 10);
   const start = x['начало'];
   const end = x['конец'];
   return {
@@ -129,6 +130,7 @@ function normalize(x) {
 }
 
 function validLesson(l) {
+  if (!l || typeof l !== 'object') return false;
   if (!(typeof l.id === 'number' || (typeof l.id === 'string' && l.id !== ''))) return false;
   if (!isRealDate(l.date)) return false;
   if (!RE_TIME.test(l.start) || !RE_TIME.test(l.end) || l.end <= l.start) return false;
@@ -232,7 +234,10 @@ module.exports = async (req, res) => {
     sdates,
     async (sdate) => {
       const j = await getJson(api(`Rasp?idGroup=${p.groupId}&sdate=${sdate}`), deadline);
-      return (j.data && j.data.rasp) || [];
+      if (!j || typeof j !== 'object' || !j.data || !Array.isArray(j.data.rasp)) {
+        throw upstreamError('malformed upstream: data.rasp is not an array', false);
+      }
+      return j.data.rasp;
     },
     CONFIG.CONCURRENCY
   );
@@ -245,7 +250,7 @@ module.exports = async (req, res) => {
     if (r.e) { errors.push({ sdate: sdates[i], error: r.e }); return; }
     for (const x of r.v) {
       const l = normalize(x);
-      if (validLesson(l)) { valid += 1; byId.set(l.id, l); } else invalid += 1;
+      if (l && validLesson(l)) { valid += 1; byId.set(l.id, l); } else invalid += 1;
     }
   });
 

@@ -197,5 +197,28 @@ const base = () => [
   ok('POST не поддерживается: 405 и заголовок Allow', r.code === 405 && r.headers.Allow === 'GET, HEAD' && calls.length === 0, { code: r.code, h: r.headers });
   r = await run({ profile: 'me' }, 'HEAD');
   ok('HEAD разрешён', r.code === 200);
+
+  // ================= новое: валидация data.rasp и защита normalize =================
+  if (I.normalize) {
+    ok('normalize: null, undefined, числа и строки возвращают null без исключения',
+      I.normalize(null) === null && I.normalize(undefined) === null && I.normalize(123) === null && I.normalize('test') === null);
+  }
+  if (I.validLesson) {
+    ok('validLesson: null, undefined и пустые объекты возвращают false',
+      I.validLesson(null) === false && I.validLesson(undefined) === false && I.validLesson({}) === false);
+  }
+
+  // Ответ Rasp без массива (data.rasp не массив): неделя считается упавшей (upstream error)
+  reset(base());
+  override = (url) => (url.includes('/Rasp?') ? { status: 200, body: { data: { rasp: null } } } : null);
+  r = await run({ profile: 'me' });
+  ok('Rasp вернул data.rasp не массив: недели в errors, общий 502 upstream failed', r.code === 502 && r.body.error === 'upstream failed' && r.body.errors.length > 0);
+
+  // Rasp содержит null / не-объекты внутри массива: не падает, отбраковывается в invalid
+  reset([row(99, '2026-09-14', '08:00', '09:30', 'лек Уцелевшая')]);
+  override = (url) => (url.includes('/Rasp?') ? { status: 200, body: { data: { rasp: [null, undefined, row(99, '2026-09-14', '08:00', '09:30', 'лек Уцелевшая')] } } } : null);
+  r = await run({ profile: 'me' });
+  ok('Rasp с null и не-объектами: парсер не падает, invalid увеличивается, валидные на месте', r.code === 200 && r.body.invalid === 2 && r.body.lessons.length === 1 && r.body.lessons[0].id === 99);
+
   process.exit(0);
 })();

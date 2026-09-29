@@ -92,6 +92,10 @@ module.exports = async (req, res) => {
     const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
     for (const who of targets) {
       if (!manual && docs[who].prefs && docs[who].prefs.notify === false) { results.push({ who, skipped: 'disabled' }); continue; }
+      if (!schedules[who]) {
+        results.push({ who, error: scheduleFull[who] ? 'schedule_partial' : 'schedule_unavailable' });
+        continue;
+      }
       const other = who === 'me' ? 'her' : 'me';
       const all = mergeLessons(schedules[who], docs[who], docs[other]);
       const upcoming = all.filter((l) => {
@@ -119,6 +123,9 @@ module.exports = async (req, res) => {
         }
       }
     }
+    console.log('notify upcoming', JSON.stringify({ manual, today, base, results }));
+    const failed = results.filter((r) => r.error);
+    if (manual && failed.length) return res.status(502).json({ ok: false, error: failed[0].error, results });
     return res.status(200).json({ ok: true, type: 'upcoming', results, cronReady: !!process.env.CRON_SECRET });
   }
 

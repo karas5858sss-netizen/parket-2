@@ -286,5 +286,25 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   });
   ok('GET с ?key=CRON_SECRET успешно авторизуется', upKey.code === 200 && upKey.body.type === 'upcoming');
 
+  // При недоступном или частичном расписании upcoming не шлёт вслепую, а фиксирует ошибку
+  reset();
+  herSchedDown = true;
+  schedErrors.me = [{ sdate: '2026-09-21', error: 'timeout' }];
+  const upErr = await new Promise((resolve) => {
+    const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
+    handler({ method: 'GET', url: '/api/notify?type=upcoming&key=cron-secret-123', headers: { host: 'parket-2.vercel.app' } }, res);
+  });
+  ok('upcoming при сбое расписания: фиксирует schedule_unavailable и schedule_partial',
+    upErr.code === 200 &&
+    upErr.body.results.some(x => x.who === 'her' && x.error === 'schedule_unavailable') &&
+    upErr.body.results.some(x => x.who === 'me' && x.error === 'schedule_partial')
+  );
+
+  const upManualErr = await new Promise((resolve) => {
+    const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
+    handler({ method: 'POST', url: '/api/notify?type=upcoming', headers: { host: 'parket-2.vercel.app', 'x-init-data': sign({ id: 222 }) } }, res);
+  });
+  ok('ручной тест upcoming при сбое расписания возвращает 502 с кодом ошибки', upManualErr.code === 502 && upManualErr.body.error === 'schedule_unavailable');
+
   Date.now = REAL_NOW; process.exit(0);
 })();
