@@ -141,6 +141,7 @@ function applyLocal(doc, patch) {
   if (patch.prefs && typeof patch.prefs.notify === 'boolean') doc.prefs.notify = patch.prefs.notify;
   if (patch.prefs && patch.prefs.seen) doc.prefs.seen = Object.assign({}, doc.prefs.seen, patch.prefs.seen);
   if (!doc.custom) doc.custom = {};
+  if (patch.custom && Object.keys(patch.custom).length) doc.custom = Object.assign({}, doc.custom);
   for (const [k, v] of Object.entries(patch.custom || {})) {
     if (v) doc.custom[k] = Object.assign({}, v, { t: now }); else delete doc.custom[k];
   }

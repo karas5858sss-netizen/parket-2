@@ -64,12 +64,22 @@ function viewWeek(all) {
 // Красная точка ставится на день, к которому нужно ДЗ: ближайшая будущая пара предмета с активным ДЗ.
 function hwDueDays(all) {
   const now = nowStr();
-  const due = new Set();
+  const activeSkeys = new Set();
   for (const [sk, v] of Object.entries(curDoc().hw)) {
-    const act = hwItems(v).filter((x) => !x.done && x.text);
-    if (act.length) {
-      const nx = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
-      if (nx) due.add(nx.date);
+    if (hwItems(v).some((x) => !x.done && x.text)) activeSkeys.add(sk);
+  }
+  if (!activeSkeys.size) return new Set();
+
+  const due = new Set();
+  const found = new Set();
+  for (const l of all) {
+    if (l.startAt > now && !isDone(l)) {
+      const k = skey(l);
+      if (activeSkeys.has(k) && !found.has(k)) {
+        due.add(l.date);
+        found.add(k);
+        if (found.size === activeSkeys.size) break;
+      }
     }
   }
   return due;

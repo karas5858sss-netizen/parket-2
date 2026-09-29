@@ -36,12 +36,27 @@ function expandCustom(id, c, owner) {
     color: null, subgroup: 0, weekType: 0, replaced: false, both: !!c.both, owner: owner || null,
   }));
 }
+let lessonsCache = { me: null, her: null };
+let lessonsCacheRefs = {
+  me: { data: null, custom: null, partnerCustom: null },
+  her: { data: null, custom: null, partnerCustom: null },
+};
+
 function allLessons(profile) {
   const p = profile || state.profile;
-  const base = (state.data[p] || {}).lessons || [];
+  const data = state.data[p];
   const doc = state.docs && state.docs[p];
   const partner = p === 'me' ? 'her' : 'me';
   const partnerDoc = state.docs && state.docs[partner];
+  const custom = doc ? doc.custom : null;
+  const partnerCustom = partnerDoc ? partnerDoc.custom : null;
+
+  const cr = lessonsCacheRefs[p];
+  if (cr && cr.data === data && cr.custom === custom && cr.partnerCustom === partnerCustom && lessonsCache[p]) {
+    return lessonsCache[p];
+  }
+
+  const base = (data || {}).lessons || [];
   const extra = [];
   if (doc && doc.custom) {
     for (const [id, c] of Object.entries(doc.custom)) {
@@ -55,8 +70,10 @@ function allLessons(profile) {
       }
     }
   }
-  if (!extra.length) return base;
-  return base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  const result = !extra.length ? base : base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
+  lessonsCache[p] = result;
+  lessonsCacheRefs[p] = { data, custom, partnerCustom };
+  return result;
 }
 
 // ---------- журнал изменений расписания ----------
