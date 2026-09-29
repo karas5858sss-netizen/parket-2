@@ -280,5 +280,11 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   });
   ok('GET /api/notify?type=upcoming возвращает type upcoming', up.code === 200 && up.body.type === 'upcoming');
 
+  const upKey = await new Promise((resolve) => {
+    const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
+    handler({ method: 'GET', url: '/api/notify?type=upcoming&key=cron-secret-123', headers: { host: 'parket-2.vercel.app' } }, res);
+  });
+  ok('GET с ?key=CRON_SECRET успешно авторизуется', upKey.code === 200 && upKey.body.type === 'upcoming');
+
   Date.now = REAL_NOW; process.exit(0);
 })();

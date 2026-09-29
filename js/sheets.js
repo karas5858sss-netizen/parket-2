@@ -128,7 +128,8 @@ function openSettings() {
       `<button class="chip" data-act="notify-set" data-v="1" aria-pressed="${on}">Включено</button>` +
       `<button class="chip" data-act="notify-set" data-v="0" aria-pressed="${!on}">Выключено</button></div>` +
       '<div class="meta">Каждый вечер около 20:00 по Москве бот присылает: твои пары на завтра, всё активное ДЗ и время занятости второго человека.</div>' +
-      '<div class="btns"><button class="btn" id="notify-test" data-act="notify-test">Прислать пример сейчас</button></div>' +
+      '<div class="btns"><button class="btn" id="notify-test" data-act="notify-test">Прислать пример сейчас</button>' +
+      '<button class="btn" id="notify-upcoming-test" data-act="notify-upcoming-test" style="margin-top:6px">Проверить события за 1 час сейчас</button></div>' +
       '<div class="meta" id="notify-status" role="status"></div>';
   } else {
     notify = '<label>Вечернее напоминание в Telegram</label><div class="meta">Работает только внутри Telegram, когда сервер настроен.</div>';
@@ -163,6 +164,28 @@ async function sendTestNotify() {
     else if (/blocked|initiate|chat not found|deactivated/i.test(j.error || '')) box.textContent = 'Бот не может тебе написать. Открой чат с ботом и нажми Start.';
     else if (r.status === 503) box.textContent = 'На сервере не хватает настроек: ' + ((j.missing || []).join(', ') || 'проверь переменные') + '.';
     else box.textContent = 'Не получилось отправить (' + (j.error || 'HTTP ' + r.status) + ').';
+  } catch (e) {
+    box.textContent = 'Нет связи с сервером.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function sendTestUpcomingNotify() {
+  const btn = document.getElementById('notify-upcoming-test');
+  const box = document.getElementById('notify-status');
+  if (!btn || !box) return;
+  btn.disabled = true;
+  box.textContent = 'Проверяю пары за 1 час…';
+  try {
+    const r = await fetch('/api/notify?type=upcoming', { method: 'POST', headers: { 'X-Init-Data': tg.initData } });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) {
+      const count = (j.results && j.results.filter((x) => x.sent).length) || 0;
+      box.textContent = count ? `Отправлено напоминаний: ${count}. Проверь чат с ботом.` : 'На ближайший час (за 45–75 мин) пар или совместных событий нет.';
+    } else {
+      box.textContent = 'Ошибка (' + (j.error || 'HTTP ' + r.status) + ').';
+    }
   } catch (e) {
     box.textContent = 'Нет связи с сервером.';
   } finally {

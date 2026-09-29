@@ -127,6 +127,7 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (act === 'notify-test') { sendTestNotify(); return; }
+  if (act === 'notify-upcoming-test') { sendTestUpcomingNotify(); return; }
   if (act === 'theme-set') {
     store.set('parket.theme', b.dataset.v);
     applyTheme();
