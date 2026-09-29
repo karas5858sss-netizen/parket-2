@@ -27,6 +27,9 @@ const good = { title: 'Английский', kind: 'пр', date: '2026-09-21', 
   ok('без подписи: 401', (await run('GET', '')).code === 401);
   ok('испорченная подпись: 401', (await run('GET', ME().replace(/hash=.{4}/, 'hash=0000'))).code === 401);
   ok('просроченная (5 дней): 401', (await run('GET', sign({ id: 111 }, 5 * 86400))).code === 401);
+  ok('просроченная чуть больше 2 дней: 401', (await run('GET', sign({ id: 111 }, 2 * 86400 + 10))).code === 401);
+  ok('подпись из будущего (> 60 сек): 401', (await run('GET', sign({ id: 111 }, -120))).code === 401);
+  ok('свежая подпись (вчерашняя, < 2 дней): 200', (await run('GET', sign({ id: 111 }, 86400))).code === 200);
   const st = await run('GET', sign({ id: 999 }));
   ok('чужой пользователь: 403 и его id', st.code === 403 && st.body.yourId === 999);
   const signedBefore = ME(); const tok = process.env.BOT_TOKEN; delete process.env.BOT_TOKEN;

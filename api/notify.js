@@ -43,10 +43,7 @@ module.exports = async (req, res) => {
     manual = true;
   } else if (req.method === 'GET') {
     const authHeader = String(req.headers.authorization || '');
-    const uAuth = new URL(req.url, 'http://localhost');
-    const querySecret = uAuth.searchParams.get('key') || uAuth.searchParams.get('secret') || '';
-    const authed = safeEqual(authHeader, 'Bearer ' + process.env.CRON_SECRET) ||
-      (!!process.env.CRON_SECRET && safeEqual(querySecret, process.env.CRON_SECRET));
+    const authed = safeEqual(authHeader, 'Bearer ' + process.env.CRON_SECRET);
     if (!authed) {
       return res.status(401).json({ error: 'unauthorized' });
     }

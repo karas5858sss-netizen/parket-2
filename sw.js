@@ -1,5 +1,5 @@
 // sw.js — Service Worker для PWA: мгновенная работа без интернета (в метро, оффлайн).
-const CACHE_NAME = 'parket-cache-v1';
+const CACHE_NAME = 'parket-cache-v2';
 const API_CACHE = 'parket-api-v1';
 
 const STATIC_ASSETS = [
@@ -72,10 +72,21 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Статические файлы и навигация: Cache First с фоновым обновлением (Stale-While-Revalidate)
-  e.respondWith(
-    caches.match(req).then((cached) => {
-      const netFetch = fetch(req)
+  // Кодовые ассеты (HTML, JS, CSS, навигация): Network First с откатом к кешу.
+  // Это исключает ситуацию, когда браузер берет новый core.js из сети, а старый state.js из кеша
+  // (версионный перекос), но сохраняет полную работоспособность оффлайн при потере сети.
+  const isCode = req.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html') ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.startsWith('/js/') ||
+    url.pathname.startsWith('/config/') ||
+    url.pathname.startsWith('/css/');
+
+  if (isCode) {
+    e.respondWith(
+      fetch(req)
         .then((netRes) => {
           if (netRes.ok) {
             const clone = netRes.clone();
@@ -84,13 +95,26 @@ self.addEventListener('fetch', (e) => {
           return netRes;
         })
         .catch(() => {
-          // Если навигация страницы и нет сети: отдаём закешированный index.html
           if (req.mode === 'navigate') {
-            return caches.match('/index.html') || caches.match('/');
+            return caches.match('/index.html').then((m) => m || caches.match('/'));
           }
-        });
+          return caches.match(req).then((m) => m || caches.match(url.pathname));
+        })
+    );
+    return;
+  }
 
-      return cached || netFetch;
+  // Медиа и статические ресурсы (иконки, манифест): Cache First с фоновым обновлением
+  e.respondWith(
+    caches.match(req).then((m) => m || caches.match(url.pathname)).then((cached) => {
+      if (cached) return cached;
+      return fetch(req).then((netRes) => {
+        if (netRes.ok) {
+          const clone = netRes.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+        }
+        return netRes;
+      });
     })
   );
 });

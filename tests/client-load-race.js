@@ -168,5 +168,19 @@ const nextCall = (calls, urlPart, used) => { const c = calls.filter((x) => x.url
     );
   }
 
+  // ---------- H: валидация Array.isArray(j.lessons) в loadQuiet() ----------
+  {
+    const { w, txt, calls } = await boot();
+    const used = new Set();
+    const cMe = nextCall(calls, 'profile=me', used);
+    const cHer = nextCall(calls, 'profile=her', used);
+    cMe.resolve(jsonResp(sched(1, 'Пара Кирилла')));
+    cHer.resolve(jsonResp({ lessons: null })); // некорректный ответ для фонового профиля
+    await wait();
+    ok('loadQuiet: lessons === null не роняет приложение и отображает основной профиль',
+      txt().includes('Пара Кирилла') && !txt().includes('Не удалось')
+    );
+  }
+
   process.exit(0);
 })();

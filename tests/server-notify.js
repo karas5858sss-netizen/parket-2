@@ -284,7 +284,7 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
     const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
     handler({ method: 'GET', url: '/api/notify?type=upcoming&key=cron-secret-123', headers: { host: 'parket-2.vercel.app' } }, res);
   });
-  ok('GET с ?key=CRON_SECRET успешно авторизуется', upKey.code === 200 && upKey.body.type === 'upcoming');
+  ok('GET с ?key=CRON_SECRET отклонён (401) — секрет больше не принимается в URL', upKey.code === 401);
 
   // При недоступном или частичном расписании upcoming не шлёт вслепую, а фиксирует ошибку
   reset();
@@ -292,7 +292,7 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   schedErrors.me = [{ sdate: '2026-09-21', error: 'timeout' }];
   const upErr = await new Promise((resolve) => {
     const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
-    handler({ method: 'GET', url: '/api/notify?type=upcoming&key=cron-secret-123', headers: { host: 'parket-2.vercel.app' } }, res);
+    handler({ method: 'GET', url: '/api/notify?type=upcoming', headers: { host: 'parket-2.vercel.app', authorization: 'Bearer cron-secret-123' } }, res);
   });
   ok('upcoming при сбое расписания: фиксирует schedule_unavailable и schedule_partial',
     upErr.code === 200 &&

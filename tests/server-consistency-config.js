@@ -64,6 +64,7 @@ ok('js/core.js берёт SLOTS/LABEL/FREE из PEOPLE (единственный
 
 const domSrc = fs.readFileSync(path.join(__dirname, '..', 'js', 'domain.js'), 'utf8');
 ok('js/domain.js: pairNo(profile, lesson) — тот же порядок аргументов, что и на сервере (lib/slots.js)', /function pairNo\(profile, l\)/.test(domSrc));
+ok('js/domain.js: GEN берёт имена из PEOPLE (единственный источник)', /PEOPLE\.me\.gen/.test(domSrc) && /PEOPLE\.her\.gen/.test(domSrc) && !/'Кирилла'/.test(domSrc) && !/'Маши'/.test(domSrc));
 
 // ---------- index.html подключает config/profiles.js раньше js/core.js ----------
 const htmlSrc = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');

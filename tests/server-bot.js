@@ -33,12 +33,18 @@ global.fetch = async (url, opts = {}) => {
 };
 
 const handler = require('../api/bot.js');
+const { botSecretToken } = handler.__internals;
+const VALID_SECRET = botSecretToken(process.env.BOT_TOKEN);
 
-const run = (method, url, body) => new Promise((resolve) => {
+const run = (method, url, body, customHeaders = {}) => new Promise((resolve) => {
   const req = {
     method,
     url,
-    headers: { host: 'parket-2.vercel.app' },
+    headers: {
+      host: 'parket-2.vercel.app',
+      'x-telegram-bot-api-secret-token': VALID_SECRET,
+      ...customHeaders,
+    },
     body,
   };
   const res = {
@@ -60,6 +66,14 @@ const ok = (name, cond, info) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + n
   telegramCalls.length = 0;
   const setup = await run('GET', '/api/bot?setup=1');
   ok('GET /api/bot?setup=1 вызывает setWebhook и setMyCommands', setup.code === 200 && telegramCalls.length === 2 && telegramCalls[0].url.includes('setWebhook') && telegramCalls[1].url.includes('setMyCommands'));
+  ok('GET /api/bot?setup=1 регистрирует secret_token в Telegram', telegramCalls[0].url.includes('secret_token=' + VALID_SECRET));
+
+  // 2.1. Защита webhook от поддельных запросов
+  const noSecret = await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/start' } }, { 'x-telegram-bot-api-secret-token': '' });
+  ok('webhook без secret token: 401 unauthorized', noSecret.code === 401 && noSecret.body.error === 'unauthorized');
+
+  const badSecret = await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/start' } }, { 'x-telegram-bot-api-secret-token': 'wrong-token' });
+  ok('webhook с чужим secret token: 401 unauthorized', badSecret.code === 401 && badSecret.body.error === 'unauthorized');
 
   // 3. Чужой пользователь
   telegramCalls.length = 0;

@@ -92,7 +92,7 @@ function allLessons(profile) {
 }
 
 // ---------- журнал изменений расписания ----------
-const GEN = { me: 'Кирилла', her: 'Маши' };
+const GEN = { me: PEOPLE.me.gen, her: PEOPLE.her.gen };
 const changesOf = (p) => (state.changes && state.changes[p]) || [];
 const seenOf = (p) => { const d = state.who && state.docs[state.who]; return (d && d.prefs && d.prefs.seen && d.prefs.seen[p]) || ''; };
 const relevantChanges = (p) => {

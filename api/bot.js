@@ -11,10 +11,15 @@
 //   /together   — совместные дела и мероприятия
 //   /start, /help — меню и кнопка запуска WebApp
 
-const { cfg, appBase, getDoc, fetchSchedule } = require('../lib/shared');
+const crypto = require('crypto');
+const { cfg, appBase, getDoc, fetchSchedule, safeEqual } = require('../lib/shared');
 const { mskNow, addDays, mergeLessons, buildDigest, NAMES } = require('../lib/digest');
 const { pairNo, jointWindows, fmtMin, dur, toMin } = require('../lib/slots');
 const PEOPLE = require('../config/profiles.js');
+
+function botSecretToken(botToken) {
+  return crypto.createHash('sha256').update(String(botToken || '') + ':parket-bot-webhook').digest('hex');
+}
 
 const TELEGRAM_TIMEOUT_MS = 8000;
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -244,9 +249,10 @@ module.exports = async (req, res) => {
     const u = new URL(req.url, 'http://localhost');
     if (u.searchParams.get('setup') === '1') {
       const webhookUrl = `${base}/api/bot`;
+      const secretToken = botSecretToken(c.botToken);
       try {
         const [whRes, cmdRes] = await Promise.all([
-          fetch(`https://api.telegram.org/bot${c.botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}`).then((r) => r.json()),
+          fetch(`https://api.telegram.org/bot${c.botToken}/setWebhook?url=${encodeURIComponent(webhookUrl)}&secret_token=${secretToken}`).then((r) => r.json()),
           fetch(`https://api.telegram.org/bot${c.botToken}/setMyCommands`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -273,6 +279,12 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'GET, POST');
     return res.status(405).json({ error: 'method_not_allowed' });
+  }
+
+  const expectedSecret = botSecretToken(c.botToken);
+  const receivedSecret = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+  if (!safeEqual(receivedSecret, expectedSecret)) {
+    return res.status(401).json({ error: 'unauthorized' });
   }
 
   const update = req.body || {};
@@ -345,3 +357,5 @@ module.exports = async (req, res) => {
   await sendTelegramMessage(c.botToken, chatId, replyText, keyboard);
   return res.status(200).json({ ok: true });
 };
+
+module.exports.__internals = { botSecretToken };
