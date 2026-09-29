@@ -43,7 +43,7 @@ const state = {
   calMode: ['month', 'subjects'].includes(store.get('parket.calmode')) ? store.get('parket.calmode') : 'week', // масштаб вкладки «Календарь»
   q: '', kind: 'all', onlyHw: false, past: false, limit: 50, // поиск
 };
-const readCache = (p) => { try { return JSON.parse(store.get('parket.cache.' + p)); } catch (e) { return null; } };
+const readCache = (p) => { try { const c = JSON.parse(store.get('parket.cache.' + p)); return (c && Array.isArray(c.lessons)) ? c : null; } catch (e) { return null; } };
 const writeCache = (p, d) => store.set('parket.cache.' + p, JSON.stringify(d));
 
 // ---------- расписание ----------
@@ -67,6 +67,7 @@ async function load(profile) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
     if (dataSeq[profile] !== myData) return; // запущен более новый запрос — этот ответ устарел
+    if (!j || !Array.isArray(j.lessons)) throw new Error('некорректный ответ расписания');
     state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
     writeCache(profile, state.data[profile]);
   } catch (e) {
@@ -103,6 +104,7 @@ async function loadQuiet(profile) {
     if (!r.ok) return;
     const j = await r.json();
     if (dataSeq[profile] !== myData) return;
+    if (!j || !Array.isArray(j.lessons)) return;
     state.data[profile] = { lessons: j.lessons, group: j.group, fetchedAt: j.fetchedAt, errors: j.errors || [] };
     writeCache(profile, state.data[profile]);
     render();
@@ -287,4 +289,7 @@ const saveHw = (sk, name, itemsOrText, done) => {
       },
     });
   }
-};
+}
+
+function getState() { return state; }
+try { window.state = state; } catch (e) {}

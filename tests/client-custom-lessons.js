@@ -21,6 +21,7 @@ const ok = (name, cond) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + name);
       w.fetch = async (url, opts = {}) => {
         const j = (b) => ({ ok: true, status: 200, json: async () => b });
         if (url.startsWith('/api/schedule')) return j(sched[url.split('=')[1]]);
+        if (url === '/api/changes') return j({ items: { me: [], her: [] } });
         if (url === '/api/state' && opts.method === 'POST') { posts.push(JSON.parse(opts.body)); return j({ ok: true }); }
         if (url === '/api/state') return j({ who: 'her', docs });
       };
@@ -86,6 +87,45 @@ const ok = (name, cond) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + name);
   ok('чужой профиль: пара владельца видна с бейджем, FAB нет', txt().includes('Консультация') && txt().includes('своя') && !d.querySelector('.fab'));
   const cons = [...d.querySelectorAll('.lesson')].find(a => a.textContent.includes('Консультация')); cons.click(); await wait();
   ok('чужая своя пара: кнопок изменения нет', !d.querySelector('[data-act="c-edit"]') && !d.querySelector('[data-act="c-del"]'));
+
+  // ---------- memoization allLessons() инвалидация при добавлении и удалении custom ----------
+  const w = dom.window;
+  const s = w.getState();
+  const beforeAdd = w.allLessons('her');
+  ok('allLessons() вызван и кэширован', Array.isArray(beforeAdd) && beforeAdd.length > 0);
+
+  // 1) allLessons() вызван → custom добавлен → второй allLessons() должен содержать новую пару
+  s.docs.her.custom.test_memo_pair = {
+    title: 'Тестовая пара кэша', kind: 'лек', date: '2026-09-19', start: '14:00', end: '15:30', room: '101'
+  };
+  const afterAdd = w.allLessons('her');
+  ok('allLessons() вызван → custom добавлен → второй allLessons() содержит новую пару',
+    afterAdd.length === beforeAdd.length + 1 &&
+    afterAdd.some(l => l.subject === 'Тестовая пара кэша' && l.start === '14:00')
+  );
+
+  // 2) Удаление custom-пары после заполненного кэша: allLessons() больше не содержит её
+  delete s.docs.her.custom.test_memo_pair;
+  const afterDel = w.allLessons('her');
+  ok('удаление custom-пары после заполненного кэша: пара исчезла из allLessons()',
+    afterDel.length === beforeAdd.length &&
+    !afterDel.some(l => l.subject === 'Тестовая пара кэша')
+  );
+
+  // 3) Добавление/удаление совместной пары партнёра (both: true) инвалидирует кэш второго профиля
+  s.docs.me.custom.test_partner_both = {
+    title: 'Совместное кино', kind: '', date: '2026-09-19', start: '16:00', end: '17:30', both: true
+  };
+  const afterPartnerAdd = w.allLessons('her');
+  ok('allLessons() партнёра инвалидируется при добавлении совместной пары',
+    afterPartnerAdd.some(l => l.subject === 'Совместное кино')
+  );
+  delete s.docs.me.custom.test_partner_both;
+  const afterPartnerDel = w.allLessons('her');
+  ok('allLessons() партнёра инвалидируется при удалении совместной пары',
+    !afterPartnerDel.some(l => l.subject === 'Совместное кино')
+  );
+
   if (errs.length) console.log('JS ERRORS', errs);
   dom.window.close(); process.exit(0);
 })();

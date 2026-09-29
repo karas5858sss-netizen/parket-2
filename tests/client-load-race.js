@@ -157,5 +157,16 @@ const nextCall = (calls, urlPart, used) => { const c = calls.filter((x) => x.url
     await wait();
     ok('после ответа расписание показано, ошибки нет, «Обновлено» на месте', !txt().includes('Не удалось') && txt().includes('Обычная пара') && txt().includes('Обновлено в'), txt());
   }
+
+  // ---------- G: валидация Array.isArray(j.lessons) — некорректный ответ не ломает клиент ----------
+  {
+    const { w, txt, calls } = await boot();
+    nextCall(calls, 'profile=me', new Set()).resolve(jsonResp({ lessons: 'not_an_array' }));
+    await wait();
+    ok('ответ без массива lessons (Array.isArray(j.lessons) === false) перехватывается с ошибкой',
+      txt().includes('Не удалось загрузить') || txt().includes('некорректный ответ')
+    );
+  }
+
   process.exit(0);
 })();

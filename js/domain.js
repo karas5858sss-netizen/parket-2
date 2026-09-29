@@ -38,9 +38,24 @@ function expandCustom(id, c, owner) {
 }
 let lessonsCache = { me: null, her: null };
 let lessonsCacheRefs = {
-  me: { data: null, custom: null, partnerCustom: null },
-  her: { data: null, custom: null, partnerCustom: null },
+  me: { data: null, customSig: null, partnerCustomSig: null },
+  her: { data: null, customSig: null, partnerCustomSig: null },
 };
+
+function customSig(c) {
+  if (!c || typeof c !== 'object') return '';
+  const keys = Object.keys(c);
+  if (!keys.length) return '';
+  keys.sort();
+  let s = '';
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const it = c[k];
+    if (!it) continue;
+    s += k + ':' + JSON.stringify(it) + ';';
+  }
+  return s;
+}
 
 function allLessons(profile) {
   const p = profile || state.profile;
@@ -48,15 +63,15 @@ function allLessons(profile) {
   const doc = state.docs && state.docs[p];
   const partner = p === 'me' ? 'her' : 'me';
   const partnerDoc = state.docs && state.docs[partner];
-  const custom = doc ? doc.custom : null;
-  const partnerCustom = partnerDoc ? partnerDoc.custom : null;
+  const cSig = customSig(doc ? doc.custom : null);
+  const pSig = customSig(partnerDoc ? partnerDoc.custom : null);
 
   const cr = lessonsCacheRefs[p];
-  if (cr && cr.data === data && cr.custom === custom && cr.partnerCustom === partnerCustom && lessonsCache[p]) {
+  if (cr && cr.data === data && cr.customSig === cSig && cr.partnerCustomSig === pSig && lessonsCache[p]) {
     return lessonsCache[p];
   }
 
-  const base = (data || {}).lessons || [];
+  const base = (data && Array.isArray(data.lessons)) ? data.lessons : [];
   const extra = [];
   if (doc && doc.custom) {
     for (const [id, c] of Object.entries(doc.custom)) {
@@ -72,7 +87,7 @@ function allLessons(profile) {
   }
   const result = !extra.length ? base : base.concat(extra).sort((a, b) => (a.startAt < b.startAt ? -1 : a.startAt > b.startAt ? 1 : 0));
   lessonsCache[p] = result;
-  lessonsCacheRefs[p] = { data, custom, partnerCustom };
+  lessonsCacheRefs[p] = { data, customSig: cSig, partnerCustomSig: pSig };
   return result;
 }
 
