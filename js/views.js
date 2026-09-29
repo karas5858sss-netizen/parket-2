@@ -10,7 +10,7 @@ function viewToday(all) {
   const cur = day.find((l) => l.startAt <= now && now < l.endAt && !isDone(l));
   const upcoming = day.filter((l) => l.startAt > now && !isDone(l));
   const past = day.filter((l) => l.endAt <= now || isDone(l));
-  let html = changesBlock() + partnerCardHTML();
+  let html = changesBlock() + partnerCardHTML() + myStatusCardHTML();
   if (cur) {
     const a = ms(cur.startAt), b = ms(cur.endAt), n = ms(now);
     const pct = Math.min(100, Math.max(0, ((n - a) / (b - a)) * 100));

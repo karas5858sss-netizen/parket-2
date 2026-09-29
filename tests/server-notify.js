@@ -271,5 +271,14 @@ const msgTo = (chat) => (tgCalls.find(c => String(c.chat_id) === chat) || {}).te
   const rr3 = await run('GET', { authorization: 'Bearer anything' });
   ok('без CRON_SECRET сам cron получает 503 с подсказкой', rr3.code === 503 && rr3.body.missing.includes('CRON_SECRET'), rr3.body);
   process.env.CRON_SECRET = savedSecret;
+
+  // ---------- проверка напоминаний за 1 час (type=upcoming) ----------
+  reset();
+  const up = await new Promise((resolve) => {
+    const res = { setHeader() {}, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); } };
+    handler({ method: 'GET', url: '/api/notify?type=upcoming', headers: { host: 'parket-2.vercel.app', authorization: 'Bearer cron-secret-123' } }, res);
+  });
+  ok('GET /api/notify?type=upcoming возвращает type upcoming', up.code === 200 && up.body.type === 'upcoming');
+
   Date.now = REAL_NOW; process.exit(0);
 })();

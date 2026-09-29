@@ -280,3 +280,110 @@ function toast(msg, undo) {
   paint();
   toastTimer = setInterval(() => { left -= 1; if (left <= 0) hideToast(); else paint(); }, 1000);
 }
+
+// ---------- совместные планы и идеи ----------
+let plansFilterCat = 'all';
+
+function openPlansSheet(cat) {
+  closeSheet();
+  if (cat) plansFilterCat = cat;
+  renderPlansSheet();
+}
+
+function renderPlansSheet() {
+  const cat = plansFilterCat;
+  const cats = [
+    ['all', 'Все'],
+    ['film', '🍿 Кино'],
+    ['food', '🍕 Еда'],
+    ['walk', '🌲 Места'],
+    ['other', '✨ Разное'],
+  ];
+  const catChips = cats.map(([k, t]) =>
+    `<button class="chip" data-act="plans-cat" data-c="${k}" aria-pressed="${cat === k}">${t}</button>`
+  ).join('');
+
+  const allWishes = [];
+  ['me', 'her'].forEach((p) => {
+    const doc = state.docs && state.docs[p];
+    if (doc && doc.wishes) {
+      for (const [id, w] of Object.entries(doc.wishes)) {
+        if (!w || !w.text) continue;
+        if (cat !== 'all' && (w.cat || 'other') !== cat) continue;
+        allWishes.push({ id, author: p, text: w.text, cat: w.cat || 'other', done: !!w.done, t: w.t || 0 });
+      }
+    }
+  });
+  allWishes.sort((a, b) => (a.done === b.done ? b.t - a.t : (a.done ? 1 : -1)));
+
+  const catEmoji = { film: '🍿', food: '🍕', walk: '🌲', other: '✨' };
+
+  const itemsHtml = allWishes.length
+    ? allWishes.map((w) => {
+        const authName = (PEOPLE[w.author] && PEOPLE[w.author].name) || (w.author === 'me' ? 'Кирилл' : 'Маша');
+        return `<div class="wish-item${w.done ? ' done' : ''}">` +
+          `<button class="wish-check" data-act="wish-toggle" data-id="${esc(w.id)}" data-auth="${w.author}" data-done="${w.done ? '1' : '0'}" aria-label="Отметить выполненным">${w.done ? '✓' : ''}</button>` +
+          `<div class="wish-body"><div class="wish-text">${esc(w.text)}</div>` +
+          `<div class="wish-meta"><span class="badge k-chg">${catEmoji[w.cat] || '✨'}</span><span class="meta">${esc(authName)}</span></div></div>` +
+          `<div class="wish-actions">` +
+          `<button class="wish-btn" data-act="wish-sched" data-text="${esc(w.text)}" title="Добавить в расписание">🗓 В календарь</button>` +
+          `<button class="wish-btn danger" data-act="wish-del" data-id="${esc(w.id)}" data-auth="${w.author}" title="Удалить">✕</button>` +
+          `</div></div>`;
+      }).join('')
+    : '<div class="empty-wishes meta">Пока нет идей в этой категории. Добавь первую ниже!</div>';
+
+  const addForm = state.who
+    ? '<div class="wish-add-form">' +
+        '<input id="wish-in" class="in" maxlength="100" placeholder="Новая идея (фильм, кафе, поездка)..." autocomplete="off">' +
+        '<div class="wish-add-row">' +
+          '<select id="wish-cat" class="in in-sm">' +
+            '<option value="film">🍿 Кино / Сериал</option>' +
+            '<option value="food">🍕 Еда / Кафе</option>' +
+            '<option value="walk">🌲 Прогулка / Место</option>' +
+            '<option value="other">✨ Другое</option>' +
+          '</select>' +
+          '<button class="btn primary btn-sm" data-act="wish-add">Добавить</button>' +
+        '</div>' +
+      '</div>'
+    : '<div class="meta">Добавление доступно только внутри Telegram.</div>';
+
+  document.getElementById('sheet').innerHTML =
+    '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet plans-sheet" role="dialog" aria-modal="true">' +
+    '<div class="ttl">🍿 Совместные планы и идеи</div>' +
+    `<div class="chips" id="plans-cats">${catChips}</div>` +
+    `<div class="wishes-list">${itemsHtml}</div>` +
+    addForm +
+    '<div class="btns"><button class="btn" data-act="sheet-close">Закрыть</button></div></div>';
+
+  document.body.style.overflow = 'hidden';
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
+}
+
+// ---------- лист ввода своего статуса ----------
+function openStatusSheet() {
+  closeSheet();
+  const cur = state.who && state.docs && state.docs[state.who] && state.docs[state.who].status && state.docs[state.who].status.text;
+  document.getElementById('sheet').innerHTML =
+    '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
+    '<div class="ttl">📍 Мой статус</div>' +
+    '<label>Где ты сейчас / чем занят(а)?</label>' +
+    `<input id="status-in" class="in" maxlength="60" placeholder="Например: гуляю в парке, на тренировке..." value="${esc(cur || '')}" autocomplete="off">` +
+    '<div class="meta">Партнёр сразу получит короткое уведомление в Telegram.</div>' +
+    '<div class="btns">' +
+      '<button class="btn primary" data-act="status-save-custom">Сохранить</button>' +
+      (cur ? '<button class="btn danger" data-act="status-clear">Сбросить</button>' : '') +
+      '<button class="btn" data-act="sheet-close">Отмена</button>' +
+    '</div></div>';
+  document.body.style.overflow = 'hidden';
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
+}

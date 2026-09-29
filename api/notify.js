@@ -7,43 +7,17 @@
 // Необязательная: APP_URL — адрес приложения для кнопки «Открыть расписание»
 // (по умолчанию берётся из заголовка запроса, то есть боевой домен).
 
-const { cfg, verifyInitData, getDoc, safeEqual, appBase, fetchSchedule, getLastNotified, setLastNotified } = require('../lib/shared');
-const { buildDigest, mskNow, addDays } = require('../lib/digest');
+const { cfg, verifyInitData, getDoc, safeEqual, appBase, fetchSchedule, getLastNotified, setLastNotified, sendTelegram, redis } = require('../lib/shared');
+const { buildDigest, mskNow, addDays, mergeLessons } = require('../lib/digest');
 const { refreshChanges } = require('../lib/detect');
 const { LOG_MAX_AGE_DAYS } = require('../lib/changes');
+const { pairNo, toMin } = require('../lib/slots');
 
 // Окно раньше было 30 часов («со вчерашнего вечера»), но если cron пропустит день (сбой Vercel,
 // не настроен CRON_SECRET и т.п.), непрочитанные изменения за это время молча выпадали бы из
 // сообщения, хотя ещё лежат в журнале. Отметка «прочитано» (seen) и так не даёт слать повторно —
 // поэтому окно теперь равно сроку жизни самого журнала (lib/changes.js), а не отдельному числу.
 const CHANGES_WINDOW_MS = LOG_MAX_AGE_DAYS * 24 * 3600 * 1000;
-const TELEGRAM_TIMEOUT_MS = 8000;
-
-async function sendTelegram(token, chatId, text, appUrl) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TELEGRAM_TIMEOUT_MS);
-  let r;
-  try {
-    r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-        reply_markup: { inline_keyboard: [[{ text: 'Открыть расписание', web_app: { url: appUrl } }]] },
-      }),
-      signal: ctrl.signal,
-    });
-  } catch (e) {
-    throw new Error(e && e.name === 'AbortError' ? 'telegram timeout' : 'telegram network: ' + ((e && e.message) || e));
-  } finally {
-    clearTimeout(timer);
-  }
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || !j.ok) throw new Error(j.description || 'telegram HTTP ' + r.status);
-}
 
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -103,6 +77,45 @@ module.exports = async (req, res) => {
   // отдельно пропускает такие случаи в lib/detect.js — здесь та же осторожность нужна для digest.
   const usable = (s) => !!(s && Array.isArray(s.lessons) && (!s.errors || !s.errors.length));
   const schedules = { me: usable(scheduleFull.me) ? scheduleFull.me.lessons : null, her: usable(scheduleFull.her) ? scheduleFull.her.lessons : null };
+
+  const u = new URL(req.url, 'http://localhost');
+  const isUpcoming = u.searchParams.get('type') === 'upcoming' || u.searchParams.get('upcoming') === '1';
+  if (isUpcoming) {
+    const today = now.slice(0, 10);
+    const nowMin = toMin(now.slice(11, 16));
+    const results = [];
+    const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+    for (const who of targets) {
+      if (!manual && docs[who].prefs && docs[who].prefs.notify === false) { results.push({ who, skipped: 'disabled' }); continue; }
+      const other = who === 'me' ? 'her' : 'me';
+      const all = mergeLessons(schedules[who], docs[who], docs[other]);
+      const upcoming = all.filter((l) => {
+        if (l.date !== today) return false;
+        const diff = toMin(l.start) - nowMin;
+        return diff >= 45 && diff <= 75; // за 45..75 минут до начала (примерно за 1 час)
+      });
+      const chatId = c.tgId[who];
+      if (!chatId) { results.push({ who, error: 'no_telegram_id' }); continue; }
+      for (const l of upcoming) {
+        const dedupeKey = `parket:v1:notified_1h:${who}:${l.date}:${l.start}:${l.subject}`;
+        const already = await redis(['GET', dedupeKey]).catch(() => null);
+        if (already) continue;
+        const room = l.room ? ', ауд. ' + (l.room.includes(' - ') ? l.room.split(' - ')[0] : l.room) : '';
+        const pn = pairNo(who, l);
+        const text = l.both
+          ? `❤️ <b>Через 1 час:</b> ${l.start}–${l.end} «${escHtml(l.subject)}»${room ? ` (${escHtml(room.slice(2))})` : ''} [вместе 👫]`
+          : `🔔 <b>Через 1 час пара:</b> ${pn ? pn + ' пара, ' : ''}${l.start}–${l.end} «${escHtml(l.subject)}»${escHtml(room)}`;
+        try {
+          await sendTelegram(c.botToken, chatId, text, base);
+          await redis(['SET', dedupeKey, '1', 'EX', 86400]).catch(() => {});
+          results.push({ who, lesson: l.subject, sent: true });
+        } catch (e) {
+          results.push({ who, lesson: l.subject, error: String((e && e.message) || e) });
+        }
+      }
+    }
+    return res.status(200).json({ ok: true, type: 'upcoming', results, cronReady: !!process.env.CRON_SECRET });
+  }
 
   // журнал изменений: расписание уже загружено выше, сверяем на его основе, потом берём непрочитанное
   let logs = { me: [], her: [] };

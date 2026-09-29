@@ -115,5 +115,19 @@ const good = { title: 'Английский', kind: 'пр', date: '2026-09-21', 
   ok('более старая метка не откатывает новую', (await doc('me')).prefs.seen.her === T1);
   await run('POST', ME(), { prefs: { seen: { me: '2026-09-21T09:00:00Z' } } });
   ok('метки двух профилей хранятся вместе', Object.keys((await doc('me')).prefs.seen).sort().join() === 'her,me');
+
+  // ---------- статусы и совместные идеи ----------
+  await run('POST', ME(), { status: { text: '🚇 Еду домой' } });
+  ok('статус сохранен', (await doc('me')).status.text === '🚇 Еду домой');
+  await run('POST', ME(), { status: null });
+  ok('статус очищен', (await doc('me')).status === null);
+
+  await run('POST', ME(), { wishes: { w1: { text: 'Кино', cat: 'film', done: false } } });
+  ok('идея сохранена у автора', (await doc('me')).wishes.w1.text === 'Кино');
+  await run('POST', HER(), { wishes: { w1: { text: 'Кино', cat: 'film', done: true } } });
+  ok('партнер может отметить выполненным чужую идею', (await doc('me')).wishes.w1.done === true);
+  await run('POST', HER(), { wishes: { w1: null } });
+  ok('партнер может удалить чужую идею', !(await doc('me')).wishes.w1);
+
   process.exit(0);
 })();

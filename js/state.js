@@ -23,6 +23,7 @@ pending.done = pending.done || {};
 pending.colors = pending.colors || {};
 pending.custom = pending.custom || {};
 pending.prefs = pending.prefs || {};
+pending.wishes = pending.wishes || {};
 
 const state = {
   who: cachedState && cachedState.who ? cachedState.who : null, // чей это телефон: 'me' | 'her'
@@ -109,7 +110,7 @@ async function loadQuiet(profile) {
 }
 
 // ---------- общее хранилище: ДЗ и отметки ----------
-const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length + Object.keys(pending.custom).length + Object.keys(pending.prefs).length > 0;
+const hasPending = () => Object.keys(pending.hw).length + Object.keys(pending.done).length + Object.keys(pending.colors).length + Object.keys(pending.custom).length + Object.keys(pending.prefs).length + Object.keys(pending.wishes).length + (pending.status !== undefined ? 1 : 0) > 0;
 const persistState = () => store.set('parket.state', JSON.stringify({ who: state.who, docs: state.docs }));
 const persistPending = () => store.set('parket.pending', JSON.stringify(pending));
 let lastStateAt = 0;
@@ -146,6 +147,17 @@ function applyLocal(doc, patch) {
   if (!doc.colors) doc.colors = {};
   for (const [k, v] of Object.entries(patch.colors || {})) {
     if (Number.isInteger(v) && v >= 0 && v < PALETTE.length) doc.colors[k] = v; else delete doc.colors[k];
+  }
+  if (patch && 'status' in patch) {
+    if (patch.status === null || (typeof patch.status === 'object' && patch.status.text === null)) {
+      doc.status = null;
+    } else if (typeof patch.status === 'object' && patch.status.text) {
+      doc.status = { text: String(patch.status.text).trim().slice(0, 60), t: now };
+    }
+  }
+  if (!doc.wishes) doc.wishes = {};
+  for (const [k, v] of Object.entries(patch.wishes || {})) {
+    if (v) doc.wishes[k] = Object.assign({}, v, { t: now }); else delete doc.wishes[k];
   }
 }
 
@@ -189,6 +201,8 @@ async function flush() {
     for (const k of Object.keys(sent.colors || {})) if (pending.colors[k] === sent.colors[k]) delete pending.colors[k];
     for (const k of Object.keys(sent.custom || {})) if (JSON.stringify(pending.custom[k]) === JSON.stringify(sent.custom[k])) delete pending.custom[k];
     for (const k of Object.keys(sent.prefs || {})) if (JSON.stringify(pending.prefs[k]) === JSON.stringify(sent.prefs[k])) delete pending.prefs[k];
+    for (const k of Object.keys(sent.wishes || {})) if (JSON.stringify(pending.wishes[k]) === JSON.stringify(sent.wishes[k])) delete pending.wishes[k];
+    if (sent.status !== undefined && JSON.stringify(pending.status) === JSON.stringify(sent.status)) delete pending.status;
     persistPending();
   } catch (e) { console.warn('flush:', e && e.message); /* останется в очереди, отправим при следующем случае */ }
   finally { flushing = false; render(); }
@@ -205,6 +219,33 @@ function save(patch) {
   render();
   flush();
 }
+
+function saveStatus(statusObj) {
+  if (!state.who) return;
+  const patch = { status: statusObj };
+  applyLocal(state.docs[state.who], patch);
+  pending.status = statusObj;
+  persistState(); persistPending();
+  render();
+  flush();
+}
+
+function saveWish(id, wishObj, author) {
+  if (!state.who) return;
+  const targetAuthor = author || state.who;
+  if (state.docs[targetAuthor]) {
+    if (wishObj === null) {
+      delete state.docs[targetAuthor].wishes[id];
+    } else {
+      state.docs[targetAuthor].wishes[id] = Object.assign({}, wishObj, { t: Date.now() });
+    }
+  }
+  pending.wishes[id] = wishObj;
+  persistState(); persistPending();
+  render();
+  flush();
+}
+
 // настройки относятся к владельцу телефона и сохраняются, даже если открыт профиль партнёра
 function savePref(patch) {
   if (!state.who) return;

@@ -107,8 +107,24 @@ function partnerCardHTML() {
   const w = jointWindows(today);
   let joint = '';
   if (w) joint = w.length ? 'Вместе свободны: ' + w.slice(0, 3).map((x) => fmtMin(x.from) + '–' + fmtMin(x.to)).join(', ') : 'Общих окон сегодня больше нет';
+  const pDoc = state.docs && state.docs[pp];
+  const pStatus = pDoc && pDoc.status && pDoc.status.text;
+  const statusLine = pStatus ? `<div class="meta partner-status">📍 <b>${name}:</b> ${esc(pStatus)}</div>` : '';
   return `<section class="partner" style="--pa:${pp === 'her' ? '#c93d63' : '#1f6fd1'}"><i class="pd"></i><div>` +
-    `<div class="ptl">${esc(head)}</div>${sub ? `<div class="meta">${esc(sub)}</div>` : ''}${joint ? `<div class="meta">${esc(joint)}</div>` : ''}${chgLine ? `<div class="meta">${esc(chgLine)}</div>` : ''}</div></section>`;
+    `<div class="ptl">${esc(head)}</div>${statusLine}${sub ? `<div class="meta">${esc(sub)}</div>` : ''}${joint ? `<div class="meta">${esc(joint)}</div>` : ''}${chgLine ? `<div class="meta">${esc(chgLine)}</div>` : ''}</div></section>`;
+}
+
+function myStatusCardHTML() {
+  if (!state.who || state.profile !== state.who) return '';
+  const myDoc = state.docs && state.docs[state.who];
+  const cur = myDoc && myDoc.status && myDoc.status.text;
+  const presets = ['🚇 Еду домой', '🎓 На парах', '🍕 На обеде', '📚 В библиотеке', '✨ Освободился(ась)', '😴 Сплю'];
+  const chips = presets.map((txt) =>
+    `<button class="chip${cur === txt ? ' active' : ''}" data-act="status-pick" data-val="${esc(txt)}" aria-pressed="${cur === txt}">${esc(txt)}</button>`
+  ).join('');
+  const clearBtn = cur ? '<button class="status-clear-btn" data-act="status-clear" title="Сбросить статус">✕ Сбросить</button>' : '';
+  const customBtn = '<button class="chip" data-act="status-custom">✏️ Свой</button>';
+  return `<section class="my-status"><div class="my-status-head"><span class="cap">Мой статус: <b>${esc(cur || 'не указан')}</b></span>${clearBtn}</div><div class="status-chips">${chips}${customBtn}</div></section>`;
 }
 
 // ---------- «Календарь»: переключатель масштаба ----------

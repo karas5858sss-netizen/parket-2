@@ -219,3 +219,41 @@ summary { cursor: pointer; }
 .subjrow .hw { margin-top: 6px; }
 
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+
+.plansbtn { padding: 0 14px; border-radius: 14px; background: var(--surface); font-size: 14px; font-weight: 500; }
+.plansbtn:active { background: var(--surface-active, rgba(0, 0, 0, .08)); }
+
+.partner-status { color: var(--accent-text); font-weight: 600; margin-top: 4px; font-size: 13px; }
+
+.my-status { margin-top: 10px; padding: 12px; border-radius: 16px; background: var(--surface); }
+.my-status-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.my-status-head .cap { font-weight: 500; color: var(--hint); }
+.my-status-head b { color: var(--text); font-weight: 600; }
+.status-clear-btn { font-size: 12px; color: var(--hint); background: transparent; padding: 2px 6px; border-radius: 6px; }
+.status-clear-btn:hover { color: #e5484d; }
+
+.status-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.status-chips::-webkit-scrollbar { display: none; }
+.status-chips .chip { flex: none; font-size: 13px; padding: 6px 10px; border-radius: 10px; background: var(--bg); color: var(--text); transition: all .15s ease; }
+.status-chips .chip.active, .status-chips .chip[aria-pressed="true"] { background: var(--accent-text, #007aff); color: #fff; font-weight: 600; }
+
+.plans-sheet { max-height: 85vh; display: flex; flex-direction: column; }
+.wishes-list { max-height: 48vh; overflow-y: auto; margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
+.wish-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: var(--surface); transition: opacity .15s; }
+.wish-item.done { opacity: 0.55; }
+.wish-item.done .wish-text { text-decoration: line-through; color: var(--hint); }
+.wish-check { width: 26px; height: 26px; border-radius: 8px; border: 1.5px solid var(--hint); display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: bold; color: var(--accent-text, #007aff); background: var(--bg); flex: none; cursor: pointer; }
+.wish-item.done .wish-check { border-color: var(--accent-text, #007aff); background: var(--accent-soft, rgba(0, 122, 255, .15)); }
+.wish-body { flex: 1; min-width: 0; }
+.wish-text { font-size: 14px; font-weight: 500; word-break: break-word; }
+.wish-meta { display: flex; gap: 6px; align-items: center; margin-top: 3px; font-size: 12px; color: var(--hint); }
+.wish-meta .badge { font-size: 11px; padding: 1px 6px; }
+.wish-actions { display: flex; gap: 4px; flex: none; }
+.wish-btn { font-size: 12px; padding: 5px 8px; border-radius: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); cursor: pointer; }
+.wish-btn.danger { color: #e5484d; }
+.wish-add-form { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.wish-add-row { display: flex; gap: 8px; }
+.in-sm { padding: 6px 10px; font-size: 13px; }
+.btn-sm { padding: 6px 14px; font-size: 13px; }
+.empty-wishes { padding: 20px 0; text-align: center; }
+

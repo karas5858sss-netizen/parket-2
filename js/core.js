@@ -3,7 +3,7 @@
 (window.PARTS = window.PARTS || []).push('core');
 
 // Версия сборки: меняй при выкладке, она видна внизу «Настроек» (чтобы понять, что телефон получил свежие файлы).
-const BUILD = '2026-09-28.3';
+const BUILD = '2026-09-29.1';
 
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) {
@@ -17,8 +17,16 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
 };
 const readJSON = (k, d) => { try { const v = JSON.parse(store.get(k)); return v == null ? d : v; } catch (e) { return d; } };
-const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {}, prefs: {} });
-const normDoc = (d) => ({ hw: (d && d.hw) || {}, done: (d && d.done) || {}, colors: (d && d.colors) || {}, custom: (d && d.custom) || {}, prefs: (d && d.prefs) || {} });
+const emptyDoc = () => ({ hw: {}, done: {}, colors: {}, custom: {}, prefs: {}, status: null, wishes: {} });
+const normDoc = (d) => ({
+  hw: (d && d.hw) || {},
+  done: (d && d.done) || {},
+  colors: (d && d.colors) || {},
+  custom: (d && d.custom) || {},
+  prefs: (d && d.prefs) || {},
+  status: (d && d.status) || null,
+  wishes: (d && d.wishes) || {},
+});
 
 // ---------- тема: Как в Telegram / Светлая / Тёмная ----------
 const THEME_BG = { light: '#ffffff', dark: '#17181c' };

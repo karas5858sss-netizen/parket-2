@@ -35,7 +35,7 @@ function render() {
   }
   const tabs = [['today', 'Сегодня'], ['cal', 'Календарь'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
     `<button data-act="tab" data-tab="${k}" aria-pressed="${k === (state.tab === 'week' || state.tab === 'month' || state.tab === 'subjects' ? 'cal' : state.tab)}">${t}</button>`).join('');
-  app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
+  app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button><button class="plansbtn" data-act="plans" aria-label="Совместные планы">🍿 Планы</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
   app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
   if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
 }
@@ -277,9 +277,92 @@ document.addEventListener('click', (e) => {
     loadQuiet(otherOf(state.profile));
     loadChanges().then(render);
     loadState().then(() => { render(); flush(); });
+  } else if (act === 'plans') {
+    openPlansSheet();
+  } else if (act === 'plans-cat') {
+    openPlansSheet(b.dataset.c);
+  } else if (act === 'wish-toggle') {
+    const wid = b.dataset.id;
+    const auth = b.dataset.auth;
+    const isDone = b.dataset.done === '1';
+    const curW = (state.docs[auth] && state.docs[auth].wishes && state.docs[auth].wishes[wid]) || {};
+    saveWish(wid, Object.assign({}, curW, { done: !isDone }), auth);
+    renderPlansSheet();
+  } else if (act === 'wish-del') {
+    saveWish(b.dataset.id, null, b.dataset.auth);
+    renderPlansSheet();
+  } else if (act === 'wish-add') {
+    const inp = document.getElementById('wish-in');
+    const csel = document.getElementById('wish-cat');
+    const txt = inp ? inp.value.trim() : '';
+    const cat = csel ? csel.value : 'other';
+    if (txt) {
+      saveWish(newId(), { text: txt, cat, done: false });
+      renderPlansSheet();
+    }
+  } else if (act === 'wish-sched') {
+    const txt = b.dataset.text;
+    closeSheet();
+    openForm(null, { title: txt, both: true });
+  } else if (act === 'status-pick') {
+    saveStatus({ text: b.dataset.val });
+  } else if (act === 'status-clear') {
+    saveStatus(null);
+    closeSheet();
+  } else if (act === 'status-custom') {
+    openStatusSheet();
+  } else if (act === 'status-save-custom') {
+    const inp = document.getElementById('status-in');
+    const val = inp ? inp.value.trim() : '';
+    if (val) saveStatus({ text: val }); else saveStatus(null);
+    closeSheet();
   }
   if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
 });
+
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+
+document.addEventListener('touchstart', (e) => {
+  if (!e.touches || e.touches.length !== 1) return;
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  touchStartTime = Date.now();
+}, { passive: true });
+
+document.addEventListener('touchend', (e) => {
+  if (!e.changedTouches || e.changedTouches.length !== 1) return;
+  const sh = document.getElementById('sheet');
+  if (sh && sh.children.length > 0) return;
+  if (e.target && typeof e.target.closest === 'function' && e.target.closest('input, textarea, select')) return;
+
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  const dt = Date.now() - touchStartTime;
+
+  if (Math.abs(dx) >= 50 && Math.abs(dx) > 1.5 * Math.abs(dy) && dt < 600) {
+    const isLeft = dx < 0;
+
+    if (state.tab === 'week') {
+      const today = nowStr().slice(0, 10);
+      const cur = state.selDate || today;
+      state.selDate = addDays(cur, isLeft ? 1 : -1);
+      state.weekOf = mondayOf(state.selDate);
+      if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (err) {} }
+      render();
+    } else if (state.tab === 'month') {
+      const today = nowStr().slice(0, 10);
+      const curM = state.month || today.slice(0, 7);
+      const [yy, mm] = curM.split('-').map(Number);
+      const nd = new Date(Date.UTC(yy, mm - 1 + (isLeft ? 1 : -1), 1));
+      state.month = nd.getUTCFullYear() + '-' + pad(nd.getUTCMonth() + 1);
+      state.calSel = null;
+      if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (err) {} }
+      render();
+    }
+  }
+}, { passive: true });
 
 document.addEventListener('input', (e) => {
   if (e.target.id === 'f-start' || e.target.id === 'f-end') { refreshSlotChips(); return; }

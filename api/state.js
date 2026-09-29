@@ -13,7 +13,8 @@
 //   HER_TG_ID   — Telegram id Маши
 //   Upstash Redis: UPSTASH_REDIS_REST_URL / _TOKEN  или  KV_REST_API_URL / _TOKEN (ставятся сами при подключении базы)
 
-const { cfg, verifyInitData, redis, docKey, getDoc } = require('../lib/shared');
+const { cfg, verifyInitData, redis, docKey, getDoc, sendTelegram, appBase } = require('../lib/shared');
+const PEOPLE = require('../config/profiles.js');
 
 const HW_MAX = 300;                // длина ДЗ
 const NAME_MAX = 120;
@@ -116,6 +117,32 @@ function applyPatch(doc, patch, now) {
     if (!doc.custom[id] && Object.keys(doc.custom).length >= MAX_CUSTOM) continue;
     doc.custom[id] = c;
   }
+  // статус («Где я»)
+  if (patch && 'status' in patch) {
+    if (patch.status === null || (typeof patch.status === 'object' && patch.status.text === null)) {
+      doc.status = null;
+    } else if (typeof patch.status === 'object' && patch.status.text) {
+      doc.status = { text: String(patch.status.text).trim().slice(0, 60), t: now };
+    }
+  }
+  // совместные планы и идеи
+  const wishes = (patch && typeof patch.wishes === 'object' && patch.wishes) || {};
+  if (!doc.wishes) doc.wishes = {};
+  for (const [id, v] of Object.entries(wishes)) {
+    if (!ID_RE.test(id) || BAD_KEYS.has(id)) continue;
+    if (v === null) { delete doc.wishes[id]; continue; }
+    if (typeof v === 'object' && v.text) {
+      const text = String(v.text).trim().slice(0, 100);
+      if (!text) { delete doc.wishes[id]; continue; }
+      const cat = ['film', 'food', 'walk', 'other'].includes(v.cat) ? v.cat : 'other';
+      doc.wishes[id] = { text, cat, done: !!v.done, t: now };
+    }
+  }
+  if (Object.keys(doc.wishes).length > 200) {
+    const sorted = Object.entries(doc.wishes).sort((a, b) => b[1].t - a[1].t);
+    doc.wishes = Object.fromEntries(sorted.slice(0, 200));
+  }
+
   const ckeys = Object.keys(doc.colors);
   if (ckeys.length > MAX_ENTRIES) ckeys.slice(0, ckeys.length - MAX_ENTRIES).forEach((k) => delete doc.colors[k]);
   const keys = Object.keys(doc.done);
@@ -155,8 +182,44 @@ module.exports = async (req, res) => {
     }
     if (req.method === 'POST') {
       const doc = await getDoc(who);
-      applyPatch(doc, parseBody(req), Date.now());
+      const parsed = parseBody(req);
+      applyPatch(doc, parsed, Date.now());
       await redis(['SET', docKey(who), JSON.stringify(doc)]);
+
+      const other = who === 'me' ? 'her' : 'me';
+
+      // Если в patch есть wishes, которые принадлежат другому профилю:
+      const wishes = (parsed && typeof parsed.wishes === 'object' && parsed.wishes) || {};
+      const otherKeys = Object.keys(wishes).filter((k) => ID_RE.test(k) && !BAD_KEYS.has(k));
+      if (otherKeys.length) {
+        const otherDoc = await getDoc(other);
+        let changedOther = false;
+        for (const k of otherKeys) {
+          if (otherDoc.wishes && k in otherDoc.wishes) {
+            const v = wishes[k];
+            if (v === null) {
+              delete otherDoc.wishes[k];
+              changedOther = true;
+            } else if (typeof v === 'object' && v.text) {
+              const text = String(v.text).trim().slice(0, 100);
+              const cat = ['film', 'food', 'walk', 'other'].includes(v.cat) ? v.cat : 'other';
+              otherDoc.wishes[k] = { text, cat, done: !!v.done, t: Date.now() };
+              changedOther = true;
+            }
+          }
+        }
+        if (changedOther) {
+          await redis(['SET', docKey(other), JSON.stringify(otherDoc)]);
+        }
+      }
+
+      // Если обновился статус — шлём короткое уведомление партнёру в Telegram
+      if (parsed && parsed.status && parsed.status.text && c.botToken && c.tgId[other]) {
+        const author = (PEOPLE[who] && PEOPLE[who].name) || (who === 'me' ? 'Кирилл' : 'Маша');
+        const msg = `📍 <b>${author}:</b> ${String(parsed.status.text).replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))}`;
+        sendTelegram(c.botToken, c.tgId[other], msg, appBase(req)).catch(() => {});
+      }
+
       return res.status(200).json({ ok: true });
     }
     res.setHeader('Allow', 'GET, POST');
