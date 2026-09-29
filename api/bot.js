@@ -18,7 +18,8 @@ const { pairNo, jointWindows, fmtMin, dur, toMin } = require('../lib/slots');
 const PEOPLE = require('../config/profiles.js');
 
 function botSecretToken(botToken) {
-  return crypto.createHash('sha256').update(String(botToken || '') + ':parket-bot-webhook').digest('hex');
+  return process.env.TELEGRAM_SECRET_TOKEN ||
+    crypto.createHash('sha256').update(String(botToken || (process.env && process.env.BOT_TOKEN) || '') + ':parket-bot-webhook').digest('hex');
 }
 
 const TELEGRAM_TIMEOUT_MS = 8000;
@@ -82,7 +83,7 @@ function handleStart(who, appUrl) {
     `Или нажми кнопку ниже, чтобы открыть полное приложение!`;
 }
 
-function handleToday({ who, today, now, mine, theirs }) {
+function handleToday({ who, today, now, mine, theirs, mySchedOk }) {
   const other = who === 'me' ? 'her' : 'me';
   const otherName = NAMES[other];
   const d = dOf(today);
@@ -93,7 +94,9 @@ function handleToday({ who, today, now, mine, theirs }) {
   // Мои пары
   const myLessons = mine.filter((l) => l.date === today);
   out += `<b>Твоё расписание:</b>\n`;
-  if (!myLessons.length) {
+  if (!mySchedOk) {
+    out += `Расписание пока недоступно.\n\n`;
+  } else if (!myLessons.length) {
     out += `Пар нет, ты ${PEOPLE[who].free} весь день! 🎉\n\n`;
   } else {
     out += myLessons.map((l) => '• ' + formatLesson(l, who)).join('\n') + '\n\n';
@@ -123,7 +126,7 @@ function handleToday({ who, today, now, mine, theirs }) {
   }
 
   // Окна сегодня
-  if (theirs) {
+  if (mySchedOk && theirs) {
     const wins = jointWindows(myLessons, theirLessons, today, nowMin);
     out += `<b>👫 Свободны вместе сегодня:</b>\n`;
     if (!wins.length) {
@@ -136,13 +139,13 @@ function handleToday({ who, today, now, mine, theirs }) {
   return out;
 }
 
-function handleFree({ who, today, now, mine, theirs }) {
+function handleFree({ who, today, now, mine, theirs, mySchedOk }) {
   const other = who === 'me' ? 'her' : 'me';
   const tomorrow = addDays(today, 1);
   const nowMin = toMin(now.slice(11, 16));
 
-  if (!theirs) {
-    return 'Расписание партнёра временно недоступно для расчёта окон.';
+  if (!mySchedOk || !theirs) {
+    return 'Расписание временно недоступно для расчёта окон.';
   }
 
   let out = `👫 <b>Свободны вместе (окна от 1 часа):</b>\n\n`;
@@ -333,19 +336,24 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, error: 'load_failed' });
   }
 
+  const usable = (s) => !!(s && Array.isArray(s.lessons) && (!s.errors || !s.errors.length));
   const docs = { me: dMe, her: dHer };
-  const schedules = { me: sMe ? sMe.lessons : null, her: sHer ? sHer.lessons : null };
+  const schedules = {
+    me: usable(sMe) ? sMe.lessons : null,
+    her: usable(sHer) ? sHer.lessons : null,
+  };
+  const mySchedOk = usable(who === 'me' ? sMe : sHer);
   const mine = mergeLessons(schedules[who], docs[who], docs[other]);
   const theirs = schedules[other] ? mergeLessons(schedules[other], docs[other], docs[who]) : null;
 
   let replyText = '';
 
   if (text === '/today' || text === '📅 Сегодня') {
-    replyText = handleToday({ who, today, now, mine, theirs });
+    replyText = handleToday({ who, today, now, mine, theirs, mySchedOk });
   } else if (text === '/tomorrow' || text === '🌅 Завтра') {
     replyText = buildDigest({ who, date: tomorrow, now, schedules, docs, changes: [] });
   } else if (text === '/free' || text === '👫 Свободны вместе') {
-    replyText = handleFree({ who, today, now, mine, theirs });
+    replyText = handleFree({ who, today, now, mine, theirs, mySchedOk });
   } else if (text === '/hw' || text === '📝 ДЗ') {
     replyText = handleHw({ who, docs, mine });
   } else if (text === '/together' || text === '❤️ Совместные дела') {

@@ -14,6 +14,11 @@ const L = (id, date, s, e, subject, extra = {}) => Object.assign({
 }, extra);
 
 const telegramCalls = [];
+let scheduleMock = {
+  me: { lessons: [L(1, '2026-09-21', '09:40', '11:10', 'Конструкция')], errors: [] },
+  her: { lessons: [L(2, '2026-09-21', '08:30', '10:05', 'Инклюзия')], errors: [] },
+};
+
 global.fetch = async (url, opts = {}) => {
   const j = (status, body) => ({ ok: status < 400, status, json: async () => body });
   if (url.startsWith('https://api.telegram.org/bot')) {
@@ -21,10 +26,10 @@ global.fetch = async (url, opts = {}) => {
     return j(200, { ok: true, result: true });
   }
   if (url.startsWith('https://parket-2.vercel.app/api/schedule?profile=me')) {
-    return j(200, { lessons: [L(1, '2026-09-21', '09:40', '11:10', 'Конструкция')] });
+    return j(200, scheduleMock.me);
   }
   if (url.startsWith('https://parket-2.vercel.app/api/schedule?profile=her')) {
-    return j(200, { lessons: [L(2, '2026-09-21', '08:30', '10:05', 'Инклюзия')] });
+    return j(200, scheduleMock.her);
   }
   if (url === 'https://redis.test') {
     return j(200, { result: kv.exec(JSON.parse(opts.body)) });
@@ -117,6 +122,34 @@ const ok = (name, cond, info) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + n
   telegramCalls.length = 0;
   await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/tomorrow' } });
   ok('/tomorrow: дайджест на завтра', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Твои пары'));
+
+  // 10. Частичное расписание (schedule.errors.length > 0) считается недоступным
+  // 10.1. Для me (Кирилл)
+  scheduleMock.me = { lessons: [L(1, '2026-09-21', '09:40', '11:10', 'Конструкция')], errors: [{ week: 1, error: 'timeout' }] };
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/today' } });
+  ok('partial schedule для me: /today сообщает, что расписание недоступно', telegramCalls[0].body.text.includes('<b>Твоё расписание:</b>\nРасписание пока недоступно.'));
+  ok('при partial schedule у себя блок общих окон не выводится', !telegramCalls[0].body.text.includes('Свободны вместе сегодня'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/free' } });
+  ok('partial schedule: /free сообщает, что расписание недоступно для расчёта', telegramCalls[0].body.text.includes('временно недоступно для расчёта'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/tomorrow' } });
+  ok('partial schedule: /tomorrow сообщает Расписание пока недоступно вместо Пар нет', telegramCalls[0].body.text.includes('<b>Твои пары</b>\nРасписание пока недоступно.'));
+
+  // 10.2. Для her (Маша)
+  scheduleMock.me = { lessons: [L(1, '2026-09-21', '09:40', '11:10', 'Конструкция')], errors: [] };
+  scheduleMock.her = { lessons: [L(2, '2026-09-21', '08:30', '10:05', 'Инклюзия')], errors: [{ week: 2, error: 'failed' }] };
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/today' } });
+  ok('partial schedule для her: у партнёра указано Расписание пока недоступно', telegramCalls[0].body.text.includes('<b>Маша:</b>\nРасписание пока недоступно.'));
+  ok('при partial schedule у партнёра блок общих окон в /today не выводится', !telegramCalls[0].body.text.includes('Свободны вместе сегодня'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/free' } });
+  ok('partial schedule у партнёра: /free также сообщает о недоступности', telegramCalls[0].body.text.includes('временно недоступно для расчёта'));
 
   process.exit(0);
 })();
