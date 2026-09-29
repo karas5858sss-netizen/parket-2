@@ -134,9 +134,19 @@ function openSettings() {
   } else {
     notify = '<label>Вечернее напоминание в Telegram</label><div class="meta">Работает только внутри Telegram, когда сервер настроен.</div>';
   }
+  const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  let pwa = '';
+  if (!isStandalone) {
+    pwa = '<label>Приложение на экран телефона (PWA)</label>' +
+      '<div class="meta">Открывается как отдельное приложение без рамок браузера и работает в метро без интернета:</div>' +
+      (window.__PWA_PROMPT ? '<div class="btns"><button class="btn primary" data-act="pwa-install">📲 Установить на телефон</button></div>' : '') +
+      '<div class="pwa-guide">' +
+        '<b>iPhone (Safari):</b> нажми «Поделиться» ⎋ ➔ «На экран "Домой"» ➔ «Добавить».<br>' +
+        '<b>Android (Chrome):</b> меню ⋮ ➔ «Установить приложение» или «Добавить на главный экран».</div>';
+  }
   document.getElementById('sheet').innerHTML =
     '<div class="sh-bg" data-act="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true">' +
-    `<div class="ttl">Настройки</div><label>Тема</label><div class="chips" id="themechips">${chips}</div>${notify}` +
+    `<div class="ttl">Настройки</div><label>Тема</label><div class="chips" id="themechips">${chips}</div>${notify}${pwa}` +
     `<div class="meta">Версия сборки: ${BUILD}</div>` +
     '<div class="btns"><button class="btn" data-act="sheet-close">Готово</button></div></div>';
   document.body.style.overflow = 'hidden';

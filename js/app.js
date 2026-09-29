@@ -316,9 +316,21 @@ document.addEventListener('click', (e) => {
     const inp = document.getElementById('status-in');
     const val = inp ? inp.value.trim() : '';
     if (val) saveStatus({ text: val }); else saveStatus(null);
-    closeSheet();
+  } else if (act === 'pwa-install') {
+    if (window.__PWA_PROMPT) {
+      window.__PWA_PROMPT.prompt();
+      window.__PWA_PROMPT.userChoice.then(() => {
+        window.__PWA_PROMPT = null;
+        closeSheet();
+      });
+    }
   }
   if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (x) {} }
+});
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  window.__PWA_PROMPT = e;
 });
 
 let touchStartX = 0;
