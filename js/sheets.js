@@ -28,7 +28,10 @@ function openSheet(o) {
     ? existing.map((it) => ({ id: it.id, text: it.text, done: it.done, t: it.t }))
     : (edit ? [{ id: newId(), text: '', done: false, t: Date.now() }] : []);
 
-  if (typeof o.tabIdx === 'number' && o.tabIdx >= 0 && o.tabIdx < sheetCtx.items.length) {
+  if (o.addMode && edit) {
+    sheetCtx.items.push({ id: newId(), text: '', done: false, t: Date.now() });
+    sheetCtx.curTab = sheetCtx.items.length - 1;
+  } else if (typeof o.tabIdx === 'number' && o.tabIdx >= 0 && o.tabIdx < sheetCtx.items.length) {
     sheetCtx.curTab = o.tabIdx;
   } else {
     const firstActive = sheetCtx.items.findIndex((it) => !it.done);
@@ -38,7 +41,7 @@ function openSheet(o) {
   if (tg && tg.BackButton) {
     try {
       tg.BackButton.show();
-      tg.BackButton.onClick(closeSheet);
+      tg.BackButton.onClick(sheetCtx.fromAllHw ? openAllHwSheet : closeSheet);
     } catch (e) {}
   }
   renderSheetContent();
@@ -420,3 +423,212 @@ function openStatusSheet() {
     } catch (e) {}
   }
 }
+
+// ---------- нижний лист со всеми ДЗ (прошедшие и будущие) ----------
+let allHwFilter = 'all';
+let allHwAddOpen = false;
+
+function openAllHwSheet(filter) {
+  closeSheet();
+  if (typeof filter === 'string') allHwFilter = filter;
+  allHwAddOpen = false;
+  renderAllHwSheet();
+}
+
+function renderAllHwSheet() {
+  const doc = curDoc();
+  const all = allLessons();
+  const now = nowStr();
+  const edit = canEdit();
+  sheetCtx = { isAllHw: true };
+
+  const subjectsMap = new Map();
+  let totalTasks = 0;
+  let activeTasks = 0;
+  let doneTasks = 0;
+
+  for (const [sk, v] of Object.entries(doc.hw)) {
+    if (!v) continue;
+    const rawItems = hwItems(v);
+    const validItems = rawItems.filter((it) => it && it.text && it.text.trim());
+    if (!validItems.length) continue;
+
+    const subName = v.name || sk;
+    const actCount = validItems.filter((it) => !it.done).length;
+    const dnCount = validItems.filter((it) => it.done).length;
+
+    totalTasks += validItems.length;
+    activeTasks += actCount;
+    doneTasks += dnCount;
+
+    const filteredItems = validItems.filter((it) => {
+      if (allHwFilter === 'active') return !it.done;
+      if (allHwFilter === 'done') return it.done;
+      return true;
+    });
+
+    const nextLesson = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
+    const lastLesson = all.filter((l) => skey(l) === sk).sort((a, b) => b.startAt.localeCompare(a.startAt))[0];
+
+    subjectsMap.set(sk, {
+      sk,
+      name: subName,
+      items: filteredItems,
+      totalCount: validItems.length,
+      activeCount: actCount,
+      doneCount: dnCount,
+      nextLesson,
+      lastLesson,
+    });
+  }
+
+  const filterChips = [
+    ['all', `Все (${totalTasks})`],
+    ['active', `Активные (${activeTasks})`],
+    ['done', `Выполненные (${doneTasks})`],
+  ].map(([k, t]) =>
+    `<button class="chip" data-act="all-hw-filter" data-v="${k}" aria-pressed="${allHwFilter === k}">${t}</button>`
+  ).join('');
+
+  const schedSubjects = [];
+  const seenSubj = new Set();
+  for (const l of all) {
+    const k = skey(l);
+    if (!seenSubj.has(k)) {
+      seenSubj.add(k);
+      schedSubjects.push({ sk: k, name: l.subject });
+    }
+  }
+  schedSubjects.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+  let addFormHtml = '';
+  if (edit) {
+    if (allHwAddOpen) {
+      const optionsHtml = schedSubjects.map((s) =>
+        `<option value="${esc(s.sk)}">${esc(s.name)}</option>`
+      ).join('') + '<option value="__custom__">+ Свой предмет...</option>';
+
+      addFormHtml = '<div class="all-hw-add-box">' +
+        '<div class="cap">Новое домашнее задание</div>' +
+        '<label>Предмет' +
+          `<select id="all-hw-subj-sel" class="in in-sm">${optionsHtml}</select>` +
+        '</label>' +
+        '<div id="all-hw-custom-subj-wrap" style="display:none;margin-top:6px;">' +
+          '<input id="all-hw-custom-subj" class="in in-sm" placeholder="Название предмета" maxlength="60">' +
+        '</div>' +
+        '<label style="margin-top:6px;">Задание' +
+          '<input id="all-hw-text-in" class="in in-sm" placeholder="Что задали" maxlength="300">' +
+        '</label>' +
+        '<div style="display:flex;gap:8px;margin-top:8px;">' +
+          '<button class="btn primary btn-sm" data-act="all-hw-add-save">Добавить</button>' +
+          '<button class="btn btn-sm" data-act="all-hw-add-cancel">Отмена</button>' +
+        '</div>' +
+      '</div>';
+    } else {
+      addFormHtml = '<div style="margin-bottom:8px;">' +
+        '<button class="btn primary btn-sm" data-act="all-hw-add-toggle">+ Добавить ДЗ</button>' +
+      '</div>';
+    }
+  }
+
+  const subjectsList = [...subjectsMap.values()].filter((s) => s.items.length > 0);
+  subjectsList.sort((a, b) => {
+    if (a.activeCount > 0 && b.activeCount === 0) return -1;
+    if (a.activeCount === 0 && b.activeCount > 0) return 1;
+    return a.name.localeCompare(b.name, 'ru');
+  });
+
+  let contentHtml = '';
+  if (!subjectsList.length) {
+    if (totalTasks === 0) {
+      contentHtml = '<div class="empty-wishes meta">Записей ДЗ пока нет.<br>Нажми «+ Добавить ДЗ», чтобы записать первое задание!</div>';
+    } else {
+      contentHtml = `<div class="empty-wishes meta">В категории «${allHwFilter === 'active' ? 'Активные' : 'Выполненные'}» пока ничего нет.</div>`;
+    }
+  } else {
+    contentHtml = subjectsList.map((s) => {
+      const col = colorOf(s.sk);
+      let dueText = '';
+      if (s.nextLesson) {
+        dueText = `Ближайшая пара: ${WD[dow(s.nextLesson.date)]}, ${human(s.nextLesson.date)} в ${s.nextLesson.start}`;
+      } else if (s.lastLesson && s.lastLesson.endAt <= now) {
+        dueText = 'Занятия по предмету уже завершились';
+      } else {
+        dueText = 'Ближайших пар в расписании нет';
+      }
+
+      const itemsHtml = s.items.map((it) => {
+        const origItems = hwItems(doc.hw[s.sk]);
+        const tabIdx = Math.max(0, origItems.findIndex((x) => x.id === it.id));
+
+        const checkBtn = edit
+          ? `<button class="all-hw-check${it.done ? ' checked' : ''}" data-act="all-hw-toggle" data-sk="${esc(s.sk)}" data-id="${esc(it.id)}" aria-label="${it.done ? 'Вернуть в активные' : 'Отметить выполненным'}">${it.done ? '✓' : ''}</button>`
+          : `<span class="all-hw-check read-only">${it.done ? '✓' : ''}</span>`;
+
+        const actionBtns = edit
+          ? `<div class="all-hw-actions">` +
+              `<button class="all-hw-action-btn" data-act="all-hw-edit" data-sk="${esc(s.sk)}" data-tab="${tabIdx}" title="Редактировать">✏️</button>` +
+              `<button class="all-hw-action-btn danger" data-act="all-hw-del" data-sk="${esc(s.sk)}" data-id="${esc(it.id)}" title="Удалить">✕</button>` +
+            `</div>`
+          : '';
+
+        const metaBadge = it.done
+          ? '<span class="badge k-pr">✓ Выполнено</span>'
+          : (s.nextLesson
+              ? `<span class="badge k-lec">к ${WD[dow(s.nextLesson.date)]}, ${human(s.nextLesson.date)}</span>`
+              : '<span class="badge k-other">активно</span>');
+
+        return `<div class="all-hw-item${it.done ? ' done' : ''}">` +
+          checkBtn +
+          `<div class="all-hw-item-body"${edit ? ` data-act="all-hw-edit" data-sk="${esc(s.sk)}" data-tab="${tabIdx}" role="button" tabindex="0"` : ''}>` +
+            `<div class="all-hw-item-text">${esc(it.text)}</div>` +
+            `<div class="all-hw-item-meta">${metaBadge}</div>` +
+          `</div>` +
+          actionBtns +
+        `</div>`;
+      }).join('');
+
+      return `<div class="all-hw-subj-card${col ? ' colored' : ''}"${col ? ` style="--c:${col}"` : ''}>` +
+        `<div class="all-hw-subj-head">` +
+          `<div class="all-hw-subj-info">` +
+            `<div class="all-hw-subj-title">${esc(s.name)}</div>` +
+            `<div class="all-hw-subj-due">${esc(dueText)}</div>` +
+          `</div>` +
+          (edit ? `<button class="all-hw-add-item-btn" data-act="all-hw-add-item" data-sk="${esc(s.sk)}">+ Задание</button>` : '') +
+        `</div>` +
+        `<div class="all-hw-items">${itemsHtml}</div>` +
+      `</div>`;
+    }).join('');
+  }
+
+  const profileName = (PEOPLE[state.profile] && PEOPLE[state.profile].name) || LABEL[state.profile];
+  const title = edit ? '📝 Все мои домашние задания' : `📝 Домашние задания: ${esc(profileName)}`;
+
+  document.getElementById('sheet').innerHTML =
+    '<div class="sh-bg" data-act="sheet-close"></div>' +
+    '<div class="sheet all-hw-sheet" role="dialog" aria-modal="true">' +
+      `<div class="ttl">${title}</div>` +
+      `<div class="chips" id="all-hw-chips">${filterChips}</div>` +
+      addFormHtml +
+      `<div class="all-hw-list">${contentHtml}</div>` +
+      '<div class="btns"><button class="btn" data-act="sheet-close">Закрыть</button></div>' +
+    '</div>';
+
+  document.body.style.overflow = 'hidden';
+
+  const sel = document.getElementById('all-hw-subj-sel');
+  if (sel) {
+    sel.addEventListener('change', () => {
+      const wrap = document.getElementById('all-hw-custom-subj-wrap');
+      if (wrap) wrap.style.display = sel.value === '__custom__' ? 'block' : 'none';
+    });
+  }
+
+  if (tg && tg.BackButton) {
+    try {
+      tg.BackButton.show();
+      tg.BackButton.onClick(closeSheet);
+    } catch (e) {}
+  }
+}
+

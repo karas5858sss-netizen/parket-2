@@ -93,7 +93,7 @@ const ok = (name, cond, info) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + n
   // Добавим данные в kv для тестов
   kv.exec(['SET', 'parket:v1:doc:me', JSON.stringify({
     hw: { 'общая психология': { name: 'Общая психология', text: 'Конспект параграфа 3', done: false } },
-    custom: { c1: { title: 'Поход в кино', kind: '', date: '2026-10-05', start: '19:00', end: '21:00', both: true } },
+    custom: { c1: { title: 'Поход в кино', kind: '', date: '2029-10-05', start: '19:00', end: '21:00', both: true } },
     done: {}, colors: {}, prefs: {}
   })]);
   kv.exec(['SET', 'parket:v1:doc:her', JSON.stringify({ hw: {}, custom: {}, done: {}, colors: {}, prefs: {} })]);

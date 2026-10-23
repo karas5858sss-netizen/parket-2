@@ -65,9 +65,14 @@ function hwListHTML() {
     });
   }
   items.sort((a, b) => b.t - a.t);
-  if (!items.length) return '';
+  const linkBtn = '<button class="all-hw-link" data-act="all-hw">Все задания (прошедшие и будущие) ›</button>';
+  if (!items.length) {
+    const hasAny = Object.values(doc.hw).some((v) => hwItems(v).some((x) => x.text));
+    return hasAny ? '<div class="hw-all-row">' + linkBtn + '</div>' : '';
+  }
   return '<h2>Активное ДЗ</h2>' + items.map((x) =>
-    `<button class="hwitem${colorOf(x.sk) ? ' colored' : ''}"${colorOf(x.sk) ? ` style="--c:${colorOf(x.sk)}"` : ''} data-act="hw" data-sk="${esc(x.sk)}" data-tab="${x.tabIdx}"><b>${esc(x.name)}</b><span>${esc(x.text)}</span></button>`).join('');
+    `<button class="hwitem${colorOf(x.sk) ? ' colored' : ''}"${colorOf(x.sk) ? ` style="--c:${colorOf(x.sk)}"` : ''} data-act="hw" data-sk="${esc(x.sk)}" data-tab="${x.tabIdx}"><b>${esc(x.name)}</b><span>${esc(x.text)}</span></button>`).join('') +
+    '<div>' + linkBtn + '</div>';
 }
 
 function jointBlock(date) {

@@ -35,7 +35,7 @@ function render() {
   }
   const tabs = [['today', 'Сегодня'], ['cal', 'Календарь'], ['search', 'Поиск'], ['stats', 'Итоги']].map(([k, t]) =>
     `<button data-act="tab" data-tab="${k}" aria-pressed="${k === (state.tab === 'week' || state.tab === 'month' || state.tab === 'subjects' ? 'cal' : state.tab)}">${t}</button>`).join('');
-  app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button><button class="plansbtn" data-act="plans" aria-label="Совместные планы">🍿 Планы</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
+  app.innerHTML = `<div class="top"><div class="switch">${sw}</div><button class="hwbtn" data-act="all-hw" aria-label="Все ДЗ">📝 ДЗ</button><button class="plansbtn" data-act="plans" aria-label="Совместные планы">🍿 Планы</button><button class="themebtn" data-act="theme" aria-label="Настройки">Настройки</button></div>${body}<nav class="tabs">${tabs}</nav>${canEdit() && d && state.tab !== 'stats' ? '<button class="fab" data-act="add" aria-label="Добавить свою пару">+</button>' : ''}`;
   app.querySelectorAll('details').forEach((el, i) => { if (openStates[i]) el.open = true; });
   if (keepQ) { const q = document.getElementById('q'); if (q) { q.focus(); try { q.setSelectionRange(keepQ.s, keepQ.e); } catch (x) {} } }
 }
@@ -139,7 +139,95 @@ document.addEventListener('click', (e) => {
     if (latest) savePref({ prefs: { seen: { [state.profile]: latest } } });
     return;
   }
-  if (act === 'sheet-close') { closeSheet(); return; }
+  if (act === 'sheet-close') {
+    if (sheetCtx && sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
+    return;
+  }
+  if (act === 'all-hw') { openAllHwSheet(); return; }
+  if (act === 'all-hw-filter') { openAllHwSheet(b.dataset.v); return; }
+  if (act === 'all-hw-toggle') {
+    const sk = b.dataset.sk;
+    const id = b.dataset.id;
+    const doc = curDoc();
+    const h = doc.hw[sk];
+    if (h) {
+      const items = hwItems(h);
+      const it = items.find((x) => x.id === id);
+      if (it) {
+        it.done = !it.done;
+        saveHw(sk, h.name || sk, items);
+        renderAllHwSheet();
+      }
+    }
+    return;
+  }
+  if (act === 'all-hw-edit') {
+    const sk = b.dataset.sk;
+    const tabIdx = b.dataset.tab ? Number(b.dataset.tab) : 0;
+    const h = curDoc().hw[sk];
+    openSheet({ sk, name: h ? h.name : sk, lesson: null, tabIdx, fromAllHw: true });
+    return;
+  }
+  if (act === 'all-hw-add-item') {
+    const sk = b.dataset.sk;
+    const h = curDoc().hw[sk];
+    openSheet({ sk, name: h ? h.name : sk, lesson: null, addMode: true, fromAllHw: true });
+    return;
+  }
+  if (act === 'all-hw-del') {
+    const sk = b.dataset.sk;
+    const id = b.dataset.id;
+    const doc = curDoc();
+    const h = doc.hw[sk];
+    if (h) {
+      const items = hwItems(h);
+      const filtered = items.filter((x) => x.id !== id);
+      confirmTG('Удалить это задание?', () => {
+        saveHw(sk, h.name || sk, filtered);
+        renderAllHwSheet();
+      });
+    }
+    return;
+  }
+  if (act === 'all-hw-add-toggle') {
+    allHwAddOpen = !allHwAddOpen;
+    renderAllHwSheet();
+    const inTxt = document.getElementById('all-hw-text-in');
+    if (inTxt) inTxt.focus();
+    return;
+  }
+  if (act === 'all-hw-add-cancel') {
+    allHwAddOpen = false;
+    renderAllHwSheet();
+    return;
+  }
+  if (act === 'all-hw-add-save') {
+    const sel = document.getElementById('all-hw-subj-sel');
+    const custIn = document.getElementById('all-hw-custom-subj');
+    const textIn = document.getElementById('all-hw-text-in');
+    const val = sel ? sel.value : '';
+    let subName = '';
+    let sk = '';
+    if (val === '__custom__') {
+      subName = custIn ? custIn.value.trim() : '';
+      sk = skey({ subject: subName });
+    } else {
+      sk = val;
+      const all = allLessons();
+      const match = all.find((l) => skey(l) === sk);
+      subName = match ? match.subject : sk;
+    }
+    const text = textIn ? textIn.value.trim().slice(0, 300) : '';
+    if (sk && text) {
+      const curH = curDoc().hw[sk];
+      const items = hwItems(curH);
+      items.push({ id: newId(), text, done: false, t: Date.now() });
+      saveHw(sk, subName || (curH && curH.name) || sk, items);
+      allHwAddOpen = false;
+      renderAllHwSheet();
+    }
+    return;
+  }
   if (act === 'color' && sheetCtx) {
     const i = Number(b.dataset.i);
     save({ colors: { [sheetCtx.sk]: i >= 0 ? i : null } });
@@ -171,7 +259,7 @@ document.addEventListener('click', (e) => {
     const ta = document.getElementById('hwtext');
     if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value.trim().slice(0, 300);
     saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
-    closeSheet();
+    if (sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
     return;
   }
   if (act === 'hw-toggle' && sheetCtx) {
@@ -180,7 +268,7 @@ document.addEventListener('click', (e) => {
     const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
     if (cur) cur.done = !cur.done;
     saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
-    closeSheet();
+    if (sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
     return;
   }
   if (act === 'hw-del-tab' && sheetCtx) {
@@ -202,7 +290,7 @@ document.addEventListener('click', (e) => {
       renderSheetContent();
     } else {
       save({ hw: { [sheetCtx.sk]: null } });
-      closeSheet();
+      if (sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
     }
     return;
   }
