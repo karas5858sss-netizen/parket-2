@@ -151,5 +151,47 @@ const ok = (name, cond, info) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + n
   await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/free' } });
   ok('partial schedule у партнёра: /free также сообщает о недоступности', telegramCalls[0].body.text.includes('временно недоступно для расчёта'));
 
+  // 11. Поддержка @bot_name и регистронезависимости
+  telegramCalls.length = 0;
+  scheduleMock.me = { lessons: [L(1, '2026-09-21', '09:40', '11:10', 'Конструкция')], errors: [] };
+  scheduleMock.her = { lessons: [L(2, '2026-09-21', '08:30', '10:05', 'Инклюзия')], errors: [] };
+
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/today@parket_bot' } });
+  ok('/today@parket_bot: распознаётся как /today', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Твоё расписание'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/Today' } });
+  ok('/Today в верхнем регистре: распознаётся', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Твоё расписание'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/hw@parket_bot' } });
+  ok('/hw@parket_bot: распознаётся как /hw', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Конспект параграфа 3'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/dz' } });
+  ok('/dz: синоним для /hw', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Конспект параграфа 3'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: 'дз' } });
+  ok('текст "дз": распознаётся как /hw', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Конспект параграфа 3'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: 'сегодня' } });
+  ok('текст "сегодня": распознаётся как /today', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Твоё расписание'));
+
+  telegramCalls.length = 0;
+  await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/start@parket_bot' } });
+  ok('/start@parket_bot: приветствие', telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Привет, Кирилл'));
+
+  // 12. Устойчивость к повреждённым данным ДЗ (null, отсутствие subject, числовые room)
+  kv.exec(['SET', 'parket:v1:doc:me', JSON.stringify({
+    hw: { broken: null, empty: { name: 'Без текста' }, valid: { name: 'Тест', text: 'Задание', done: false } },
+    custom: { c1: { title: 'Событие', room: 101, date: '2029-10-05', start: '19:00', end: '21:00', both: true } },
+    done: {}, colors: {}, prefs: {}
+  })]);
+  telegramCalls.length = 0;
+  const safeRes = await run('POST', '/api/bot', { message: { chat: { id: 111 }, text: '/hw' } });
+  ok('устойчивость handleHw к null-записям в hw: код 200 и ответ отправлен', safeRes.code === 200 && telegramCalls.length === 1 && telegramCalls[0].body.text.includes('Задание'));
+
   process.exit(0);
 })();

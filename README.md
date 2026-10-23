@@ -108,5 +108,12 @@ ID групп меняются каждый учебный год.
 **ДЗ «недоступно».** `/api/state` вернул 503: не настроена база Upstash или `BOT_TOKEN`; 403: чей-то ID не в `ME_TG_ID`/`HER_TG_ID`
 (приложение само покажет ID).
 
+**Команды бота в Telegram перестали отвечать.**
+1. Если бот перестал отвечать на команды, нужно заново зарегистрировать webhook со `secret_token` в Telegram Bot API. Для этого просто перейди по адресу в браузере:
+   `https://parket-2.vercel.app/api/bot?setup=1`
+   Должен прийти ответ `{"ok":true,"setWebhook":{"ok":true,"result":true,...},"setMyCommands":...}`. После этого Telegram начнёт слать секретный заголовок, и бот сразу заработает.
+2. Проверь, что в Vercel заданы `BOT_TOKEN`, `ME_TG_ID` и `HER_TG_ID`.
+3. В Vercel (Project → Logs, фильтр по `/api/bot`): ошибки 401 означают отсутствие или несовпадение `secret_token` (решается переходом по ссылке `?setup=1` выше).
+
 **Изменилось расписание звонков.** Правь `PEOPLE.me.slots`/`PEOPLE.her.slots` в `config/profiles.js` —
 это единственное место; `js/core.js` и `lib/slots.js` сами прочитают новое значение оттуда.

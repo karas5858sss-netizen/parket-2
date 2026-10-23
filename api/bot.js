@@ -63,10 +63,19 @@ function getMainKeyboard(appUrl) {
   };
 }
 
+function parseCommand(text) {
+  const raw = String(text || '').trim();
+  const lower = raw.toLowerCase();
+  const firstWord = (raw.split(/\s+/)[0] || '').toLowerCase();
+  const cmd = firstWord.split('@')[0];
+  return { raw, lower, cmd };
+}
+
 function formatLesson(l, profile) {
-  const room = l.room ? ', ауд. ' + (l.room.includes(' - ') ? l.room.split(' - ')[0] : l.room) : '';
+  const roomStr = String((l && l.room) || '');
+  const room = roomStr ? ', ауд. ' + (roomStr.includes(' - ') ? roomStr.split(' - ')[0] : roomStr) : '';
   const no = pairNo(profile, l);
-  const tag = l.both ? ' <b>[вместе 👫]</b>' : '';
+  const tag = l && l.both ? ' <b>[вместе 👫]</b>' : '';
   return `${no ? no + ' пара: ' : ''}<b>${esc(l.start)}–${esc(l.end)}</b> ${esc(l.subject)}${tag}${l.kind ? ' (' + esc(l.kind) + ')' : ''}${esc(room)}`;
 }
 
@@ -175,16 +184,17 @@ function handleHw({ who, docs, mine }) {
   const other = who === 'me' ? 'her' : 'me';
   const myHw = [];
   const now = mskNow();
-  const skey = (l) => l.subject.trim().toLowerCase().replace(/\s+/g, ' ');
+  const skey = (l) => String((l && l.subject) || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
   for (const [k, v] of Object.entries((docs[who] && docs[who].hw) || {})) {
-    const nx = mine.find((l) => l.startAt > now && skey(l) === k);
+    if (!v || typeof v !== 'object') continue;
+    const nx = (mine || []).find((l) => l && l.startAt > now && skey(l) === k);
     const all = Array.isArray(v.items) && v.items.length
       ? v.items
       : (v.text ? [{ text: v.text, done: !!v.done }] : []);
-    const active = all.filter((it) => !it.done && it.text);
+    const active = all.filter((it) => it && !it.done && it.text);
     for (const it of active) {
-      myHw.push({ name: v.name || k, text: it.text, due: nx ? nx.date : null });
+      myHw.push({ name: v.name || k, text: String(it.text), due: nx ? nx.date : null });
     }
   }
 
@@ -208,7 +218,7 @@ function handleTogether({ who, docs, today }) {
     const doc = docs[p];
     if (doc && doc.custom) {
       for (const [id, c] of Object.entries(doc.custom)) {
-        if (c && c.both && c.date >= today) {
+        if (c && c.both && c.date && c.date >= today) {
           allEvents.push({ ...c, owner: p });
         }
       }
@@ -224,14 +234,18 @@ function handleTogether({ who, docs, today }) {
   } else {
     let lastDate = '';
     for (const ev of allEvents.slice(0, 15)) {
+      if (!ev || !ev.date) continue;
       if (ev.date !== lastDate) {
         const d = dOf(ev.date);
-        out += `\n<b>${WEEKDAYS[d.getUTCDay()]}, ${humanDate(ev.date)}:</b>\n`;
-        lastDate = ev.date;
+        if (!isNaN(d.getTime())) {
+          out += `\n<b>${WEEKDAYS[d.getUTCDay()]}, ${humanDate(ev.date)}:</b>\n`;
+          lastDate = ev.date;
+        }
       }
-      const room = ev.room ? ` (📍 ${esc(ev.room)})` : '';
-      const by = ev.owner === who ? '' : ` <i>[добавил(а) ${NAMES[ev.owner]}]</i>`;
-      out += `• <b>${esc(ev.start)}–${esc(ev.end)}</b> ${esc(ev.title)}${room}${by}\n`;
+      const roomStr = String(ev.room || '');
+      const room = roomStr ? ` (📍 ${esc(roomStr)})` : '';
+      const by = ev.owner === who ? '' : ` <i>[добавил(а) ${NAMES[ev.owner] || ev.owner}]</i>`;
+      out += `• <b>${esc(ev.start)}–${esc(ev.end)}</b> ${esc(ev.title || 'Событие')}${room}${by}\n`;
     }
   }
 
@@ -309,14 +323,14 @@ module.exports = async (req, res) => {
     return res.status(200).json({ ok: true, skipped: 'unauthorized_user', chatId });
   }
 
-  const text = String(msg.text || '').trim();
+  const { raw: text, lower: lowerText, cmd } = parseCommand(msg.text);
   const keyboard = getMainKeyboard(base);
   const now = mskNow();
   const today = now.slice(0, 10);
   const tomorrow = addDays(today, 1);
 
   // Обработка /start и /help
-  if (text === '/start' || text === '/help' || text.startsWith('/start ') || text === '📱 Открыть ПАР·КЕТ') {
+  if (cmd === '/start' || cmd === '/help' || lowerText === 'помощь' || lowerText === 'справка' || text === '📱 Открыть ПАР·КЕТ') {
     await sendTelegramMessage(c.botToken, chatId, handleStart(who, base), keyboard);
     return res.status(200).json({ ok: true, command: 'start' });
   }
@@ -348,22 +362,28 @@ module.exports = async (req, res) => {
 
   let replyText = '';
 
-  if (text === '/today' || text === '📅 Сегодня') {
-    replyText = handleToday({ who, today, now, mine, theirs, mySchedOk });
-  } else if (text === '/tomorrow' || text === '🌅 Завтра') {
-    replyText = buildDigest({ who, date: tomorrow, now, schedules, docs, changes: [] });
-  } else if (text === '/free' || text === '👫 Свободны вместе') {
-    replyText = handleFree({ who, today, now, mine, theirs, mySchedOk });
-  } else if (text === '/hw' || text === '📝 ДЗ') {
-    replyText = handleHw({ who, docs, mine });
-  } else if (text === '/together' || text === '❤️ Совместные дела') {
-    replyText = handleTogether({ who, docs, today });
-  } else {
-    replyText = `Я не понял команду «${esc(text)}».\nВыбери кнопку на клавиатуре или отправь /help.`;
-  }
+  try {
+    if (cmd === '/today' || text === '📅 Сегодня' || lowerText === 'сегодня') {
+      replyText = handleToday({ who, today, now, mine, theirs, mySchedOk });
+    } else if (cmd === '/tomorrow' || text === '🌅 Завтра' || lowerText === 'завтра') {
+      replyText = buildDigest({ who, date: tomorrow, now, schedules, docs, changes: [] });
+    } else if (cmd === '/free' || text === '👫 Свободны вместе' || lowerText === 'свободны вместе' || lowerText === 'окна') {
+      replyText = handleFree({ who, today, now, mine, theirs, mySchedOk });
+    } else if (cmd === '/hw' || cmd === '/dz' || text === '📝 ДЗ' || lowerText === 'дз' || lowerText === 'домашнее задание' || lowerText === 'домашние задания') {
+      replyText = handleHw({ who, docs, mine });
+    } else if (cmd === '/together' || cmd === '/plans' || text === '❤️ Совместные дела' || lowerText === 'совместные дела' || lowerText === 'планы' || lowerText === 'вместе') {
+      replyText = handleTogether({ who, docs, today });
+    } else {
+      replyText = `Я не понял команду «${esc(text)}».\nВыбери кнопку на клавиатуре или отправь /help.`;
+    }
 
-  await sendTelegramMessage(c.botToken, chatId, replyText, keyboard);
-  return res.status(200).json({ ok: true });
+    await sendTelegramMessage(c.botToken, chatId, replyText, keyboard);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('bot command error:', err);
+    await sendTelegramMessage(c.botToken, chatId, '⚠️ Не удалось обработать команду. Попробуй через минуту.', keyboard).catch(() => {});
+    return res.status(200).json({ ok: true, error: 'command_failed' });
+  }
 };
 
 module.exports.__internals = { botSecretToken };
