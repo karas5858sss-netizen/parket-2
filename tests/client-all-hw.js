@@ -101,10 +101,12 @@ async function boot({ who = 'her', tg = true, initialHw = {} } = {}) {
 
   // 8. Быстрое добавление нового ДЗ через форму
   await t.click('[data-act="all-hw-add-toggle"]');
-  ok('форма добавления ДЗ открылась', !!t.d.getElementById('all-hw-subj-sel') && !!t.d.getElementById('all-hw-text-in'));
+  ok('форма добавления ДЗ открылась', !!t.d.getElementById('all-hw-subj-sel') && !!t.d.getElementById('all-hw-text-in') && !!t.d.getElementById('all-hw-due-in'));
+  await t.click('[data-act="all-hw-kind"][data-v="пр"]');
+  t.d.getElementById('all-hw-due-in').value = '2026-09-25';
   t.d.getElementById('all-hw-text-in').value = 'Решить тест в СДО';
   await t.click('[data-act="all-hw-add-save"]');
-  ok('новое ДЗ сохранено и отобразилось', t.sheet().includes('Решить тест в СДО'));
+  ok('новое ДЗ сохранено и отобразилось с типом и дедлайном', t.sheet().includes('Решить тест в СДО') && t.sheet().includes('пр') && t.sheet().includes('25 сентября'));
 
   // 9. Редактирование: клик по ✏️ открывает подробный редактор
   await t.click('[data-act="all-hw-edit"][data-sk="инклюзия - зона доступа"]');

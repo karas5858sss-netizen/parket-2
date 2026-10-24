@@ -188,15 +188,22 @@ function handleHw({ who, docs, mine }) {
 
   for (const [k, v] of Object.entries((docs[who] && docs[who].hw) || {})) {
     if (!v || typeof v !== 'object') continue;
-    const nx = (mine || []).find((l) => l && l.startAt > now && skey(l) === k);
     const all = Array.isArray(v.items) && v.items.length
       ? v.items
       : (v.text ? [{ text: v.text, done: !!v.done }] : []);
     const active = all.filter((it) => it && !it.done && it.text);
     for (const it of active) {
-      myHw.push({ name: v.name || k, text: String(it.text), due: nx ? nx.date : null });
+      let due = it.due || null;
+      if (!due) {
+        const nx = (mine || []).find((l) => l && l.startAt > now && skey(l) === k && (!it.kind || l.kind === it.kind));
+        due = nx ? nx.date : null;
+      }
+      const kindTag = it.kind ? ` [${it.kind}]` : '';
+      myHw.push({ name: (v.name || k) + kindTag, text: String(it.text), due });
     }
   }
+
+  myHw.sort((a, b) => ((a.due || '9999') < (b.due || '9999') ? -1 : (a.due || '9999') > (b.due || '9999') ? 1 : 0));
 
   let out = `📝 <b>Активные домашние задания:</b>\n\n`;
   if (!myHw.length) {

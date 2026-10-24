@@ -48,9 +48,9 @@ const good = { title: 'Английский', kind: 'пр', date: '2026-09-21', 
   await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', text: 'x'.repeat(400), done: false }, '__proto__': { text: 'evil' }, ['k'.repeat(200)]: { text: 'long key' } }, done: { '2026-09-19|08:30|инклюзия': true } });
   let d = await doc('me');
   ok('ДЗ обрезается до 300 символов', d.hw['общая психология'].text.length === 300);
-  await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', items: [{ id: '1', text: 'Задание 1', done: false }, { id: '2', text: 'Задание 2', done: true }] } } });
+  await run('POST', ME(), { hw: { 'общая психология': { name: 'Общая психология', items: [{ id: '1', text: 'Задание 1', done: false, kind: 'лек', due: '2026-10-28' }, { id: '2', text: 'Задание 2', done: true, kind: 'bad', due: 'invalid-date' }] } } });
   d = await doc('me');
-  ok('сохранение нескольких вкладок ДЗ', d.hw['общая психология'].items.length === 2 && d.hw['общая психология'].items[0].text === 'Задание 1' && d.hw['общая психология'].items[1].done === true);
+  ok('сохранение нескольких вкладок ДЗ с kind и due', d.hw['общая психология'].items.length === 2 && d.hw['общая психология'].items[0].kind === 'лек' && d.hw['общая психология'].items[0].due === '2026-10-28' && d.hw['общая психология'].items[1].kind === null && d.hw['общая психология'].items[1].due === null);
   ok('«__proto__» и слишком длинные ключи игнорируются', !Object.prototype.hasOwnProperty.call(d.hw, '__proto__') && Object.keys(d.hw).length === 1);
   ok('отметка «пройдена» сохранена', d.done['2026-09-19|08:30|инклюзия'] > 0);
   ok('партнёр видит чужой документ', Object.keys((await doc('me', HER())).hw).length === 1);

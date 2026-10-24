@@ -87,17 +87,25 @@ function applyPatch(doc, patch, now) {
         if (!it || typeof it !== 'object') continue;
         const itText = String(it.text || '').trim().slice(0, HW_MAX);
         if (!itText) continue;
+        const kind = typeof it.kind === 'string' && ['лек', 'пр', 'лаб'].includes(it.kind.trim().toLowerCase()) ? it.kind.trim().toLowerCase() : null;
+        const due = typeof it.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(it.due) ? it.due : null;
         items.push({
           id: String(it.id || Date.now().toString(36)).slice(0, 40),
           text: itText,
           done: !!it.done,
+          kind,
+          due,
           t: Number(it.t) || now,
         });
       }
     }
     const text = String(v.text || (items[0] && items[0].text) || '').trim().slice(0, HW_MAX);
     if (!text && !items.length) { delete doc.hw[k]; continue; }
-    if (!items.length && text) items = [{ id: '1', text, done: !!v.done, t: now }];
+    if (!items.length && text) {
+      const kind = typeof v.kind === 'string' && ['лек', 'пр', 'лаб'].includes(v.kind.trim().toLowerCase()) ? v.kind.trim().toLowerCase() : null;
+      const due = typeof v.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.due) ? v.due : null;
+      items = [{ id: '1', text, done: !!v.done, kind, due, t: now }];
+    }
     const done = items.length ? items.every((x) => x.done) : !!v.done;
     doc.hw[k] = { name: String(v.name || '').slice(0, NAME_MAX), text, done, items, t: now };
   }

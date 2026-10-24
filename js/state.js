@@ -127,14 +127,25 @@ function applyLocal(doc, patch) {
         id: String(it.id || i + 1),
         text: String(it.text || '').trim().slice(0, 300),
         done: !!it.done,
+        kind: it.kind && ['лек', 'пр', 'лаб'].includes(it.kind) ? it.kind : null,
+        due: typeof it.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(it.due) ? it.due : null,
         t: it.t || now,
       }));
     }
     const text = String(v.text || (items[0] && items[0].text) || '').trim().slice(0, 300);
     if (!text && !items.length) { delete doc.hw[k]; continue; }
-    if (!items.length && text) items = [{ id: '1', text, done: !!v.done, t: now }];
+    if (!items.length && text) items = [{ id: '1', text, done: !!v.done, kind: v.kind || null, due: v.due || null, t: now }];
     const done = items.length ? items.every((x) => x.done) : !!v.done;
-    doc.hw[k] = { name: v.name || '', text, done, items, t: now };
+    const firstActive = items.find((x) => !x.done) || items[0];
+    doc.hw[k] = {
+      name: v.name || '',
+      text,
+      done,
+      kind: (firstActive && firstActive.kind) || v.kind || null,
+      due: (firstActive && firstActive.due) || v.due || null,
+      items,
+      t: now,
+    };
   }
   for (const [k, v] of Object.entries(patch.done || {})) {
     if (v) doc.done[k] = now; else delete doc.done[k];
@@ -268,11 +279,13 @@ const saveHw = (sk, name, itemsOrText, done) => {
       id: String(x.id || i + 1),
       text: String(x.text || '').trim().slice(0, 300),
       done: !!x.done,
+      kind: x.kind && ['лек', 'пр', 'лаб'].includes(x.kind) ? x.kind : null,
+      due: typeof x.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x.due) ? x.due : null,
       t: x.t || Date.now(),
     }));
   } else if (typeof itemsOrText === 'string') {
     const text = itemsOrText.trim().slice(0, 300);
-    if (text) items = [{ id: '1', text, done: !!done, t: Date.now() }];
+    if (text) items = [{ id: '1', text, done: !!done, kind: null, due: null, t: Date.now() }];
   }
   if (!items.length) {
     save({ hw: { [sk]: null } });
@@ -284,12 +297,14 @@ const saveHw = (sk, name, itemsOrText, done) => {
           name: name || '',
           text: firstActive.text,
           done: items.every((x) => x.done),
+          kind: firstActive.kind || null,
+          due: firstActive.due || null,
           items,
         },
       },
     });
   }
-}
+};
 
 function getState() { return state; }
 try { window.state = state; } catch (e) {}

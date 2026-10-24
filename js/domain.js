@@ -17,12 +17,33 @@ const hwItems = (h) => {
       id: String(it.id || i + 1),
       text: String(it.text || ''),
       done: !!it.done,
+      kind: it.kind || null,
+      due: it.due || null,
       t: it.t || 0,
     }));
   }
-  if (h.text) return [{ id: '1', text: String(h.text), done: !!h.done, t: h.t || 0 }];
+  if (h.text) return [{ id: '1', text: String(h.text), done: !!h.done, kind: h.kind || null, due: h.due || null, t: h.t || 0 }];
   return [];
 };
+
+// Расчёт срока сдачи и целевой пары для ДЗ:
+// Если задан it.due — берётся он; если нет — ищется ближайшая пара предмета sk (с учётом it.kind, если задан).
+function hwItemDue(it, sk, all, now) {
+  const curNow = now || nowStr();
+  const list = all || allLessons();
+  if (it && it.due) {
+    const l = list.find((x) => x.date === it.due && skey(x) === sk && (!it.kind || x.kind === it.kind)) ||
+              list.find((x) => x.date === it.due && skey(x) === sk) || null;
+    return { due: it.due, lesson: l, manual: true };
+  }
+  if (it && it.kind) {
+    const match = list.find((x) => x.startAt > curNow && skey(x) === sk && x.kind === it.kind && !isDone(x));
+    if (match) return { due: match.date, lesson: match, manual: false };
+  }
+  const anyMatch = list.find((x) => x.startAt > curNow && skey(x) === sk && !isDone(x));
+  if (anyMatch) return { due: anyMatch.date, lesson: anyMatch, manual: false };
+  return { due: null, lesson: null, manual: false };
+}
 
 // ---------- свои пары: превращаем записи в обычные карточки ----------
 function expandCustom(id, c, owner) {

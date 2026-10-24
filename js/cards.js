@@ -37,10 +37,20 @@ function lessonHTML(l) {
       v.map((x) => `<div>п/г ${x.n}: ${esc(x.teacher)}, ${esc(x.room)}</div>`).join('') + '</div></details>';
   }
   const allHw = hwItems(hw);
-  const activeHw = allHw.filter((x) => !x.done && x.text);
-  if (activeHw.length) {
-    const more = activeHw.length > 1 ? ` <span class="badge k-hw">+${activeHw.length - 1}</span>` : '';
-    meta += `<div class="hw"><i class="rd"></i><span>${esc(activeHw[0].text)}</span>${more}</div>`;
+  const forThisCard = allHw.filter((x) => !x.done && x.text && (!x.kind || !l.kind || x.kind === l.kind));
+  if (forThisCard.length) {
+    const curNow = nowStr();
+    const all = allLessons();
+    forThisCard.sort((a, b) => {
+      const da = hwItemDue(a, skey(l), all, curNow).due || '9999-99-99';
+      const db = hwItemDue(b, skey(l), all, curNow).due || '9999-99-99';
+      return da.localeCompare(db);
+    });
+    const first = forThisCard[0];
+    const kindCls = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[first.kind] || 'other';
+    const kindTag = first.kind ? `<span class="badge k-${kindCls}">${esc(first.kind)}</span> ` : '';
+    const more = forThisCard.length > 1 ? ` <span class="badge k-hw">+${forThisCard.length - 1}</span>` : '';
+    meta += `<div class="hw"><i class="rd"></i>${kindTag}<span>${esc(first.text)}</span>${more}</div>`;
   }
   const done = !!doc.done[lkey(l)];
   if (done) meta += '<div class="meta okline">✓ пройдена</div>';
@@ -56,23 +66,43 @@ function lessonHTML(l) {
 function hwListHTML() {
   const doc = curDoc();
   const items = [];
+  const all = allLessons();
+  const now = nowStr();
   for (const [k, v] of Object.entries(doc.hw)) {
-    const all = hwItems(v);
-    all.forEach((it, idx) => {
+    const allHw = hwItems(v);
+    allHw.forEach((it, idx) => {
       if (!it.done && it.text) {
-        items.push({ sk: k, name: v.name || k, text: it.text, tabIdx: idx, t: it.t || v.t || 0 });
+        const info = hwItemDue(it, k, all, now);
+        items.push({
+          sk: k,
+          name: v.name || k,
+          text: it.text,
+          kind: it.kind || null,
+          due: info.due,
+          tabIdx: idx,
+          t: it.t || v.t || 0,
+        });
       }
     });
   }
-  items.sort((a, b) => b.t - a.t);
+  // Сортировка по ближайшей паре / дедлайну!
+  items.sort((a, b) => {
+    const da = a.due || '9999-99-99';
+    const db = b.due || '9999-99-99';
+    if (da !== db) return da.localeCompare(db);
+    return b.t - a.t;
+  });
   const linkBtn = '<button class="all-hw-link" data-act="all-hw">Все задания (прошедшие и будущие) ›</button>';
   if (!items.length) {
     const hasAny = Object.values(doc.hw).some((v) => hwItems(v).some((x) => x.text));
     return hasAny ? '<div class="hw-all-row">' + linkBtn + '</div>' : '';
   }
-  return '<h2>Активное ДЗ</h2>' + items.map((x) =>
-    `<button class="hwitem${colorOf(x.sk) ? ' colored' : ''}"${colorOf(x.sk) ? ` style="--c:${colorOf(x.sk)}"` : ''} data-act="hw" data-sk="${esc(x.sk)}" data-tab="${x.tabIdx}"><b>${esc(x.name)}</b><span>${esc(x.text)}</span></button>`).join('') +
-    '<div>' + linkBtn + '</div>';
+  return '<h2>Активное ДЗ</h2>' + items.map((x) => {
+    const kindCls = { 'лек': 'lec', 'пр': 'pr', 'лаб': 'lab' }[x.kind] || 'other';
+    const kindTag = x.kind ? ` <span class="badge k-${kindCls}">${esc(x.kind)}</span>` : '';
+    return `<button class="hwitem${colorOf(x.sk) ? ' colored' : ''}"${colorOf(x.sk) ? ` style="--c:${colorOf(x.sk)}"` : ''} data-act="hw" data-sk="${esc(x.sk)}" data-tab="${x.tabIdx}"><b>${esc(x.name)}</b>${kindTag}<span>${esc(x.text)}</span></button>`;
+  }).join('') +
+  '<div>' + linkBtn + '</div>';
 }
 
 function jointBlock(date) {

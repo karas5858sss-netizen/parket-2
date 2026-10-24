@@ -61,24 +61,17 @@ function viewWeek(all) {
 }
 
 // ---------- экран «Месяц» ----------
-// Красная точка ставится на день, к которому нужно ДЗ: ближайшая будущая пара предмета с активным ДЗ.
+// Красная точка ставится на день, к которому нужно ДЗ: дата due или ближайшая пара предмета/типа.
 function hwDueDays(all) {
   const now = nowStr();
-  const activeSkeys = new Set();
-  for (const [sk, v] of Object.entries(curDoc().hw)) {
-    if (hwItems(v).some((x) => !x.done && x.text)) activeSkeys.add(sk);
-  }
-  if (!activeSkeys.size) return new Set();
-
   const due = new Set();
-  const found = new Set();
-  for (const l of all) {
-    if (l.startAt > now && !isDone(l)) {
-      const k = skey(l);
-      if (activeSkeys.has(k) && !found.has(k)) {
-        due.add(l.date);
-        found.add(k);
-        if (found.size === activeSkeys.size) break;
+  const doc = curDoc();
+  for (const [sk, v] of Object.entries(doc.hw)) {
+    const items = hwItems(v);
+    for (const it of items) {
+      if (!it.done && it.text) {
+        const info = hwItemDue(it, sk, all, now);
+        if (info.due) due.add(info.due);
       }
     }
   }

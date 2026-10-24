@@ -52,6 +52,19 @@ const check = (name, cond) => console.log((cond ? 'PASS' : 'FAIL') + '  ' + name
   check('отметка ушла на сервер', t.posts.some(p => Object.values(p.done || {}).includes(true)));
   t.d.querySelector('[data-act="undo"]').click(); await wait();
   check('UNDO снял отметку и спрятал тост', !t.txt().includes('✓ пройдена') && t.d.getElementById('toast').hidden && t.posts.some(p => Object.values(p.done || {}).includes(null)));
+
+  // Проверка разделения ДЗ по типам (лекция vs практика):
+  const allCards = t.d.querySelectorAll('.lesson[data-act="open"]');
+  // 3-я пара (индекс 2) — лекция «Основы российской государственности»
+  allCards[2].click(); await wait();
+  check('при открытии лекции автоматически предвыбран тип лек', t.d.querySelector('[data-act="hw-kind"][data-v="лек"]').getAttribute('aria-pressed') === 'true');
+  t.d.getElementById('hwtext').value = 'Прочитать первоисточник к лекции';
+  t.d.querySelector('[data-act="hw-save"]').click(); await wait();
+  const prCard = t.d.querySelectorAll('.lesson[data-act="open"]')[1];
+  const lecCard = t.d.querySelectorAll('.lesson[data-act="open"]')[2];
+  check('лекционное ДЗ видно в карточке лекции', lecCard.textContent.includes('Прочитать первоисточник'));
+  check('лекционное ДЗ не видно в карточке практики того же предмета', !prCard.textContent.includes('Прочитать первоисточник'));
+
   // D: чужой профиль
   t.d.querySelector('[data-act="profile"][data-p="me"]').click(); await wait();
   check('чужой профиль: подпись «только просмотр»', t.txt().includes('только просмотр'));

@@ -5,6 +5,8 @@
 // ---------- нижний лист с ДЗ ----------
 let sheetCtx = null;
 let formCtx = null;
+let allHwAddKind = '';
+
 function closeSheet() {
   if (tg && tg.BackButton) {
     try {
@@ -24,12 +26,24 @@ function openSheet(o) {
   const edit = canEdit();
   sheetCtx = Object.assign({}, o);
   const existing = hwItems(hw);
+  const defKind = o.lesson && o.lesson.kind ? o.lesson.kind : null;
   sheetCtx.items = existing.length
-    ? existing.map((it) => ({ id: it.id, text: it.text, done: it.done, t: it.t }))
-    : (edit ? [{ id: newId(), text: '', done: false, t: Date.now() }] : []);
+    ? existing.map((it) => ({ id: it.id, text: it.text, done: it.done, kind: it.kind || null, due: it.due || null, t: it.t }))
+    : (edit ? [{ id: newId(), text: '', done: false, kind: defKind, due: null, t: Date.now() }] : []);
+
+  // Сортировка заданий по ближайшей паре / сроку сдачи:
+  const all = allLessons();
+  const now = nowStr();
+  sheetCtx.items.sort((a, b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const da = hwItemDue(a, o.sk, all, now).due || '9999-99-99';
+    const db = hwItemDue(b, o.sk, all, now).due || '9999-99-99';
+    if (da !== db) return da.localeCompare(db);
+    return (a.t || 0) - (b.t || 0);
+  });
 
   if (o.addMode && edit) {
-    sheetCtx.items.push({ id: newId(), text: '', done: false, t: Date.now() });
+    sheetCtx.items.push({ id: newId(), text: '', done: false, kind: defKind, due: null, t: Date.now() });
     sheetCtx.curTab = sheetCtx.items.length - 1;
   } else if (typeof o.tabIdx === 'number' && o.tabIdx >= 0 && o.tabIdx < sheetCtx.items.length) {
     sheetCtx.curTab = o.tabIdx;
@@ -64,8 +78,9 @@ function renderSheetContent() {
       (cc.until ? '<button class="btn" data-act="c-skip">Пропустить только эту дату</button>' : '') +
       `<button class="btn danger" data-act="c-del">${cc.until ? 'Удалить всю серию' : (cc.both ? 'Удалить мероприятие' : 'Удалить пару')}</button>`
     : '';
+  const kindLabel = l && l.kind ? ' (' + esc(l.kind) + ')' : '';
   const head = l
-    ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(state.profile, l) ? ', ' + pairNo(state.profile, l) + ' пара' : ''}</div>${own}`
+    ? `<div class="ttl">${esc(l.subject)}</div><div class="meta">${WD[dow(l.date)]}, ${human(l.date)}, ${esc(l.start)}–${esc(l.end)}${pairNo(state.profile, l) ? ', ' + pairNo(state.profile, l) + ' пара' : ''}${kindLabel}</div>${own}`
     : `<div class="ttl">${esc(o.name || 'ДЗ')}</div>`;
 
   const items = sheetCtx.items || [];
@@ -73,11 +88,15 @@ function renderSheetContent() {
   sheetCtx.curTab = idx;
   const cur = items[idx] || null;
 
+  const all = allLessons();
+  const now = nowStr();
+
   let tabsHtml = '';
   if (items.length > 1 || edit) {
     tabsHtml = '<div class="hw-tabs" id="hwtabs" role="tablist">' +
       items.map((it, i) => {
-        const title = (it.done ? '✓ ' : '') + `ДЗ ${i + 1}`;
+        const kindTag = it.kind ? ` [${esc(it.kind)}]` : '';
+        const title = (it.done ? '✓ ' : '') + `ДЗ ${i + 1}${kindTag}`;
         const isSel = i === idx;
         const closeX = (edit && items.length > 1 && isSel)
           ? `<span class="hw-tab-x" data-act="hw-del-tab" data-i="${i}" title="Удалить это ДЗ" aria-label="Удалить">×</span>`
@@ -91,12 +110,39 @@ function renderSheetContent() {
   let body;
   if (edit) {
     const text = cur ? cur.text : '';
+    const curKind = cur ? cur.kind || '' : '';
+    const curDue = cur ? cur.due || '' : '';
     const curColor = doc.colors[o.sk];
     const sws = PALETTE.map(([c, n], i) => `<button class="sw" style="--c:${c}" data-act="color" data-i="${i}" aria-label="${n}" aria-pressed="${curColor === i}"></button>`).join('') +
       `<button class="sw none" data-act="color" data-i="-1" aria-label="без цвета" aria-pressed="${!Number.isInteger(curColor)}"></button>`;
     const hasMultiple = items.length > 1;
     const hasText = cur && cur.text && cur.text.trim();
+
+    const dueInfo = hwItemDue(cur, o.sk, all, now);
+    let dueHintText = '';
+    if (curDue) {
+      dueHintText = ' (задано вручную)';
+    } else if (dueInfo.due) {
+      const dObj = dOf(dueInfo.due);
+      const dowName = !isNaN(dObj.getTime()) ? WD[dow(dueInfo.due)] + ', ' : '';
+      const kText = dueInfo.lesson && dueInfo.lesson.kind ? ' ' + dueInfo.lesson.kind : '';
+      dueHintText = ` (авто: ${dowName}${human(dueInfo.due)}${kText})`;
+    } else {
+      dueHintText = ' (пар в расписании нет)';
+    }
+
+    const kindChips = [
+      ['', 'Все пары'],
+      ['лек', 'Лекция (лек)'],
+      ['пр', 'Практика (пр)'],
+      ['лаб', 'Лаба (лаб)'],
+    ].map(([v, t]) =>
+      `<button type="button" class="chip" data-act="hw-kind" data-v="${v}" aria-pressed="${curKind === v}">${t}</button>`
+    ).join('');
+
     body = tabsHtml +
+      `<label>К какой паре</label><div class="chips" id="hw-kind-chips">${kindChips}</div>` +
+      `<label>Сдать к дате<span class="meta">${dueHintText}</span><input type="date" id="hw-due-in" class="in" value="${esc(curDue)}"></label>` +
       `<label>ДЗ по предмету <span class="cnt"><span id="cnt">${text.length}</span>/300</span>` +
       `<textarea id="hwtext" rows="3" maxlength="300" placeholder="Что задали">${esc(text)}</textarea></label>` +
       `<label>Цвет предмета</label><div class="swatches" id="swatches">${sws}</div><div class="btns">` +
@@ -106,9 +152,17 @@ function renderSheetContent() {
       (l ? `<button class="btn" data-act="lesson-done">${doc.done[lkey(l)] ? 'Снять отметку «пройдена»' : 'Отметить пару пройденной'}</button>` : '') +
       custBtns + '<button class="btn" data-act="sheet-close">Закрыть</button></div>';
   } else {
+    const dueInfo = hwItemDue(cur, o.sk, all, now);
+    let viewDue = '';
+    if (dueInfo.due) {
+      const dObj = dOf(dueInfo.due);
+      const dowName = !isNaN(dObj.getTime()) ? WD[dow(dueInfo.due)] + ', ' : '';
+      viewDue = `\nСдать к: ${dowName}${human(dueInfo.due)}`;
+    }
+    const kindDesc = cur && cur.kind ? ` [${esc(cur.kind)}]` : '';
     body = tabsHtml +
       '<label>ДЗ по предмету</label><div class="view">' +
-      (cur && cur.text ? esc(cur.text) + (cur.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
+      (cur && cur.text ? esc(cur.text) + kindDesc + viewDue + (cur.done ? '\n(выполнено)' : '') : 'ДЗ нет') + '</div>' +
       '<div class="btns"><button class="btn" data-act="sheet-close">Закрыть</button></div>';
   }
 
@@ -467,6 +521,24 @@ function renderAllHwSheet() {
       return true;
     });
 
+    // Сортировка заданий внутри предмета по ближайшей дате сдачи:
+    filteredItems.sort((a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      const da = hwItemDue(a, sk, all, now).due || '9999-99-99';
+      const db = hwItemDue(b, sk, all, now).due || '9999-99-99';
+      if (da !== db) return da.localeCompare(db);
+      return (a.t || 0) - (b.t || 0);
+    });
+
+    // Находим самую раннюю дату дедлайна среди невыполненных заданий предмета
+    let earliestActiveDue = '9999-99-99';
+    for (const it of validItems) {
+      if (!it.done) {
+        const d = hwItemDue(it, sk, all, now).due;
+        if (d && d < earliestActiveDue) earliestActiveDue = d;
+      }
+    }
+
     const nextLesson = all.find((l) => l.startAt > now && skey(l) === sk && !isDone(l));
     const lastLesson = all.filter((l) => skey(l) === sk).sort((a, b) => b.startAt.localeCompare(a.startAt))[0];
 
@@ -477,6 +549,7 @@ function renderAllHwSheet() {
       totalCount: validItems.length,
       activeCount: actCount,
       doneCount: dnCount,
+      earliestActiveDue,
       nextLesson,
       lastLesson,
     });
@@ -508,6 +581,15 @@ function renderAllHwSheet() {
         `<option value="${esc(s.sk)}">${esc(s.name)}</option>`
       ).join('') + '<option value="__custom__">+ Свой предмет...</option>';
 
+      const kindChipsHtml = [
+        ['', 'Все пары'],
+        ['лек', 'Лекция'],
+        ['пр', 'Практика'],
+        ['лаб', 'Лаба'],
+      ].map(([v, t]) =>
+        `<button type="button" class="chip chip-sm" data-act="all-hw-kind" data-v="${v}" aria-pressed="${allHwAddKind === v}">${t}</button>`
+      ).join('');
+
       addFormHtml = '<div class="all-hw-add-box">' +
         '<div class="cap">Новое домашнее задание</div>' +
         '<label>Предмет' +
@@ -516,6 +598,12 @@ function renderAllHwSheet() {
         '<div id="all-hw-custom-subj-wrap" style="display:none;margin-top:6px;">' +
           '<input id="all-hw-custom-subj" class="in in-sm" placeholder="Название предмета" maxlength="60">' +
         '</div>' +
+        '<label style="margin-top:6px;">К какой паре' +
+          `<div class="chips" id="all-hw-kind-chips" style="margin-top:4px;">${kindChipsHtml}</div>` +
+        '</label>' +
+        '<label style="margin-top:6px;">Сдать к дате (необязательно)' +
+          '<input type="date" id="all-hw-due-in" class="in in-sm">' +
+        '</label>' +
         '<label style="margin-top:6px;">Задание' +
           '<input id="all-hw-text-in" class="in in-sm" placeholder="Что задали" maxlength="300">' +
         '</label>' +
@@ -535,6 +623,11 @@ function renderAllHwSheet() {
   subjectsList.sort((a, b) => {
     if (a.activeCount > 0 && b.activeCount === 0) return -1;
     if (a.activeCount === 0 && b.activeCount > 0) return 1;
+    if (a.activeCount > 0 && b.activeCount > 0) {
+      if (a.earliestActiveDue !== b.earliestActiveDue) {
+        return a.earliestActiveDue.localeCompare(b.earliestActiveDue);
+      }
+    }
     return a.name.localeCompare(b.name, 'ru');
   });
 
@@ -572,17 +665,27 @@ function renderAllHwSheet() {
             `</div>`
           : '';
 
-        const metaBadge = it.done
-          ? '<span class="badge k-pr">✓ Выполнено</span>'
-          : (s.nextLesson
-              ? `<span class="badge k-lec">к ${WD[dow(s.nextLesson.date)]}, ${human(s.nextLesson.date)}</span>`
-              : '<span class="badge k-other">активно</span>');
+        const dueInfo = hwItemDue(it, s.sk, all, now);
+        let dueBadge = '';
+        if (it.done) {
+          dueBadge = '<span class="badge k-pr">✓ Выполнено</span>';
+        } else if (dueInfo.due) {
+          const dObj = dOf(dueInfo.due);
+          const dowName = !isNaN(dObj.getTime()) ? WD[dow(dueInfo.due)] + ', ' : '';
+          dueBadge = `<span class="badge k-lec">к ${dowName}${human(dueInfo.due)}</span>`;
+        } else {
+          dueBadge = '<span class="badge k-other">активно</span>';
+        }
+
+        const kindBadge = it.kind
+          ? `<span class="badge k-${it.kind === 'лек' ? 'lec' : (it.kind === 'лаб' ? 'lab' : 'pr')}">${esc(it.kind)}</span> `
+          : '';
 
         return `<div class="all-hw-item${it.done ? ' done' : ''}">` +
           checkBtn +
           `<div class="all-hw-item-body"${edit ? ` data-act="all-hw-edit" data-sk="${esc(s.sk)}" data-tab="${tabIdx}" role="button" tabindex="0"` : ''}>` +
             `<div class="all-hw-item-text">${esc(it.text)}</div>` +
-            `<div class="all-hw-item-meta">${metaBadge}</div>` +
+            `<div class="all-hw-item-meta">${kindBadge}${dueBadge}</div>` +
           `</div>` +
           actionBtns +
         `</div>`;

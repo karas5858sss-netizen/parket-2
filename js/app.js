@@ -189,6 +189,13 @@ document.addEventListener('click', (e) => {
     }
     return;
   }
+  if (act === 'all-hw-kind') {
+    allHwAddKind = b.dataset.v || '';
+    document.querySelectorAll('#all-hw-kind-chips .chip').forEach((el) => {
+      el.setAttribute('aria-pressed', String((el.dataset.v || '') === allHwAddKind));
+    });
+    return;
+  }
   if (act === 'all-hw-add-toggle') {
     allHwAddOpen = !allHwAddOpen;
     renderAllHwSheet();
@@ -198,6 +205,7 @@ document.addEventListener('click', (e) => {
   }
   if (act === 'all-hw-add-cancel') {
     allHwAddOpen = false;
+    allHwAddKind = '';
     renderAllHwSheet();
     return;
   }
@@ -205,6 +213,7 @@ document.addEventListener('click', (e) => {
     const sel = document.getElementById('all-hw-subj-sel');
     const custIn = document.getElementById('all-hw-custom-subj');
     const textIn = document.getElementById('all-hw-text-in');
+    const dueIn = document.getElementById('all-hw-due-in');
     const val = sel ? sel.value : '';
     let subName = '';
     let sk = '';
@@ -218,12 +227,15 @@ document.addEventListener('click', (e) => {
       subName = match ? match.subject : sk;
     }
     const text = textIn ? textIn.value.trim().slice(0, 300) : '';
+    const due = dueIn && dueIn.value.trim() ? dueIn.value.trim() : null;
+    const kind = allHwAddKind ? allHwAddKind : null;
     if (sk && text) {
       const curH = curDoc().hw[sk];
       const items = hwItems(curH);
-      items.push({ id: newId(), text, done: false, t: Date.now() });
+      items.push({ id: newId(), text, done: false, kind, due, t: Date.now() });
       saveHw(sk, subName || (curH && curH.name) || sk, items);
       allHwAddOpen = false;
+      allHwAddKind = '';
       renderAllHwSheet();
     }
     return;
@@ -238,17 +250,40 @@ document.addEventListener('click', (e) => {
     });
     return;
   }
+  if (act === 'hw-kind' && sheetCtx) {
+    const ta = document.getElementById('hwtext');
+    const dueIn = document.getElementById('hw-due-in');
+    const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
+    if (cur) {
+      if (ta) cur.text = ta.value;
+      if (dueIn) cur.due = dueIn.value.trim() || null;
+      cur.kind = b.dataset.v || null;
+    }
+    renderSheetContent();
+    return;
+  }
   if (act === 'hw-tab' && sheetCtx) {
     const ta = document.getElementById('hwtext');
-    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value;
+    const dueIn = document.getElementById('hw-due-in');
+    const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
+    if (cur) {
+      if (ta) cur.text = ta.value;
+      if (dueIn) cur.due = dueIn.value.trim() || null;
+    }
     sheetCtx.curTab = Number(b.dataset.i);
     renderSheetContent();
     return;
   }
   if (act === 'hw-add' && sheetCtx) {
     const ta = document.getElementById('hwtext');
-    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value;
-    sheetCtx.items.push({ id: newId(), text: '', done: false, t: Date.now() });
+    const dueIn = document.getElementById('hw-due-in');
+    const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
+    if (cur) {
+      if (ta) cur.text = ta.value;
+      if (dueIn) cur.due = dueIn.value.trim() || null;
+    }
+    const defKind = sheetCtx.lesson && sheetCtx.lesson.kind ? sheetCtx.lesson.kind : null;
+    sheetCtx.items.push({ id: newId(), text: '', done: false, kind: defKind, due: null, t: Date.now() });
     sheetCtx.curTab = sheetCtx.items.length - 1;
     renderSheetContent();
     const nta = document.getElementById('hwtext');
@@ -257,16 +292,25 @@ document.addEventListener('click', (e) => {
   }
   if (act === 'hw-save' && sheetCtx) {
     const ta = document.getElementById('hwtext');
-    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value.trim().slice(0, 300);
+    const dueIn = document.getElementById('hw-due-in');
+    const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
+    if (cur) {
+      if (ta) cur.text = ta.value.trim().slice(0, 300);
+      if (dueIn) cur.due = dueIn.value.trim() || null;
+    }
     saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
     if (sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
     return;
   }
   if (act === 'hw-toggle' && sheetCtx) {
     const ta = document.getElementById('hwtext');
-    if (ta && sheetCtx.items && sheetCtx.items[sheetCtx.curTab]) sheetCtx.items[sheetCtx.curTab].text = ta.value.trim().slice(0, 300);
+    const dueIn = document.getElementById('hw-due-in');
     const cur = sheetCtx.items && sheetCtx.items[sheetCtx.curTab];
-    if (cur) cur.done = !cur.done;
+    if (cur) {
+      if (ta) cur.text = ta.value.trim().slice(0, 300);
+      if (dueIn) cur.due = dueIn.value.trim() || null;
+      cur.done = !cur.done;
+    }
     saveHw(sheetCtx.sk, sheetCtx.name, sheetCtx.items);
     if (sheetCtx.fromAllHw) { openAllHwSheet(); } else { closeSheet(); }
     return;
